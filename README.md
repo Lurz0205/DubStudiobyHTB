@@ -31,7 +31,7 @@
    - Biểu tượng **DubStudio** sẽ tự động xuất hiện trên màn hình Desktop.
 2. **Thiết lập lần đầu**:
    - Mở ứng dụng, vào mục **Cài đặt**.
-   - Dán mã API dịch thuật (Google Gemini hoặc Groq) và bấm **Lưu**.
+   - Dán mã API dịch thuật (Groq) và bấm **Lưu**.
 3. **Lồng tiếng video**:
    - Ở mục **Studio**, bấm **`+ Thêm video`** để chọn video tiếng Trung trên máy tính.
    - Bấm **`⚡ Chạy lồng tiếng`** và đợi ứng dụng xử lý tự động từ A-Z.
