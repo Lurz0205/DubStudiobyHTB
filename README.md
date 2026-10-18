@@ -1,6 +1,6 @@
-# DubStudio — Trình Lồng Tiếng Video AI (Trung -> Việt)
+# DubStudio - Trình tự động lồng tiếng video (Vietsub Trung -> Việt)
 
-**DubStudio** là ứng dụng trên máy tính giúp chuyển đổi video tiếng Trung sang video lồng tiếng Việt có phụ đề tự động. Toàn bộ các mô hình AI (nhận dạng giọng nói, tách nhạc nền, tạo giọng thuyết minh) đều chạy trực tiếp trên máy tính của bạn, không tải video lên mạng, bảo mật và hoàn toàn miễn phí.
+**DubStudio** là ứng dụng trên máy tính giúp chuyển đổi video tiếng Trung sang video lồng tiếng Việt có phụ đề tự động. Toàn bộ các mô hình AI (nhận dạng giọng nói, tách nhạc nền, tạo giọng thuyết minh) đều chạy trực tiếp trên máy tính của bạn, không cần tải video lên mạng, bảo mật và hoàn toàn miễn phí.
 
 ---
 
