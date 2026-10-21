@@ -7,18 +7,18 @@
 ## Tính năng nổi bật trong bản v1.0.0 Beta
 
 - **Nhận dạng giọng nói ASR chuẩn xác**:
-  - Hỗ trợ mô hình **`faster-whisper large-v3`** (khuyên dùng): Bắt trọn 100% câu thoại dồn dập, tiết tấu nhanh, không nuốt chữ.
+  - Hỗ trợ mô hình **`faster-whisper large-v3`** (khuyên dùng): Cho độ chính xác rất cao, cần thời gian xử lí lâu.
   - Hỗ trợ mô hình **`faster-whisper large-v3-turbo`**: Xử lý nhanh gấp 2 lần, nhẹ RAM/VRAM cho video dài.
-  - Bảng hướng dẫn & so sánh trực quan ngay khi mở ứng dụng lần đầu hoặc trong mục **Cài đặt**.
+  - Xem chi tiết so sánh hai mô hình trong mục **Cài đặt**.
 - **Dịch thuật AI linh hoạt theo ngữ cảnh**:
-  - **Gemini Web (Trình duyệt độc lập)**: Hoạt động tự động trong nền, miễn phí không cần API Key.
-  - **Groq Cloud API**: Tốc độ dịch siêu tốc, văn phong thuần Việt tự nhiên với Qwen 2.5.
+  - **Gemini Web (Trình duyệt độc lập)**: Hoạt động bằng gemini web, miễn phí không cần API Key.
+  - **Groq Cloud API**: Tốc độ dịch nhanh với Qwen 2.5 nhưng thỉnh thoảng bị lỗi Timeout do API giới hạn số lần yêu cầu trong một khoảng thời gian.
 - **Thuyết minh AI VieNeu-TTS Offline**:
-  - Tích hợp sẵn nhiều giọng đọc Nam/Nữ Bắc - Nam giàu cảm xúc, chạy hoàn toàn offline không tốn phí.
+  - Tích hợp sẵn nhiều giọng đọc Nam/Nữ Bắc - Nam, chạy hoàn toàn offline không tốn phí.
   - Tự động cân chỉnh tempo, chống đè giọng và tái tạo câu thoại thông minh.
 - **Biên tập Phụ đề & Video chuyên nghiệp**:
-  - Tự do kéo thả, định vị phụ đề, che chữ gốc với khối màu xoay (-180° đến 180°), khắc cứng phụ đề ASS chất lượng cao.
-  - Cắt ghép nhiều video, khuếch đại âm lượng thoại rõ nét chuẩn truyền hình (+10.5 dB Compand).
+  - Tự do kéo thả, định vị phụ đề, che chữ gốc với khối màu, khắc cứng phụ đề ASS chất lượng cao.
+  - Cắt ghép nhiều video, khuếch đại âm lượng thoại rõ nét.
 
 ---
 
