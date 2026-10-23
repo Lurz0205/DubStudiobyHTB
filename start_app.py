@@ -2,10 +2,18 @@ import os
 import sys
 import multiprocessing
 
-# 1. CRITICAL: Prevent infinite subprocess window spawning on Windows PyInstaller
+# 1. Environment & Subsystem Guards
+os.environ.setdefault("QT_MEDIA_BACKEND", "windows")
+os.environ.setdefault("NO_PROXY", "127.0.0.1,localhost")
+os.environ.setdefault("PYTHONUTF8", "1")
+
+# 2. CRITICAL: Prevent infinite subprocess window spawning on Windows PyInstaller
 multiprocessing.freeze_support()
 
-# 2. Windowed Mode Stream Guards: ensure sys.stdout and sys.stderr are NEVER None
+# 3. Windowed Mode Stream Guards: ensure sys.stdin, sys.stdout, sys.stderr are NEVER None
+if sys.stdin is None:
+    sys.stdin = open(os.devnull, "r", encoding="utf-8")
+
 if sys.stdout is None:
     sys.stdout = open(os.devnull, "w", encoding="utf-8")
 elif hasattr(sys.stdout, "reconfigure"):
