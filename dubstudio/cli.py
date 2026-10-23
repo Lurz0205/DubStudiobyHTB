@@ -205,7 +205,8 @@ def stage(
     cfg = AppConfig.load()
     if not job_id:
         job_id = get_job_id_for_file(video_path)
-    workspace_path = cfg.general.workspace_dir / job_id
+    from dubstudio.paths import resolve_job_workspace
+    workspace_path = resolve_job_workspace(job_id)
     job = JobContext(workspace_path=workspace_path, job_id=job_id, input_path=video_path)
 
     try:
@@ -265,7 +266,8 @@ def run(
     cfg = AppConfig.load()
     if not job_id:
         job_id = get_job_id_for_file(video_path)
-    workspace_path = cfg.general.workspace_dir / job_id
+    from dubstudio.paths import resolve_job_workspace
+    workspace_path = resolve_job_workspace(job_id)
     job = JobContext(workspace_path=workspace_path, job_id=job_id, input_path=video_path)
 
     console.print(f"[bold cyan]🚀 Bắt đầu xử lý:[/bold cyan] {video_path.name} (Job: {job_id})")

@@ -158,6 +158,11 @@ def get_subprocess_env() -> dict[str, str]:
     new_pythonpath = os.pathsep.join(paths_to_add + ([existing_pythonpath] if existing_pythonpath else []))
     env["PYTHONPATH"] = new_pythonpath
 
+    if is_packaged():
+        env["DUBSTUDIO_FORCE_PACKAGED"] = "1"
+        from dubstudio.paths import get_workspace_dir
+        env["DUBSTUDIO_WORKSPACE_DIR"] = str(get_workspace_dir().resolve())
+
     return env
 
 

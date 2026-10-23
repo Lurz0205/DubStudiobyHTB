@@ -567,52 +567,63 @@ def _run_pipeline_worker(job_id: str, video_path: Path, subtitles_only: bool = F
 def list_jobs():
     """List all workspace jobs with their stage statuses and metadata."""
     cfg = AppConfig.load()
-    ws_dir = cfg.general.workspace_dir
-    ws_dir.mkdir(parents=True, exist_ok=True)
+    from dubstudio.paths import get_user_base_dir, get_app_dir, resolve_job_workspace
+
+    candidate_roots = [cfg.general.workspace_dir]
+    for extra in [get_user_base_dir() / "workspace", get_app_dir() / "workspace", Path("dist/DubStudio/workspace")]:
+        if extra.exists() and extra not in candidate_roots:
+            candidate_roots.append(extra)
 
     jobs = []
+    seen_ids = set()
     non_job_dirs = {".cache", ".edge_profile", "components", "__pycache__"}
-    for item in ws_dir.iterdir():
-        if item.is_dir() and not item.name.startswith(".") and item.name not in non_job_dirs:
-            state_file = item / "state.json"
-            meta_file = item / "meta.json"
-            probe_file = item / "probe.json"
 
-            video_name = item.name
-            created_at = ""
-            if meta_file.exists():
-                try:
-                    m = json.loads(meta_file.read_text(encoding="utf-8"))
-                    video_name = m.get("video_name", video_name)
-                    created_at = m.get("created_at", "")
-                except Exception:
-                    pass
+    for root in candidate_roots:
+        if not root.exists():
+            continue
+        for item in root.iterdir():
+            if item.is_dir() and not item.name.startswith(".") and item.name not in non_job_dirs and item.name not in seen_ids:
+                seen_ids.add(item.name)
+                actual_dir = resolve_job_workspace(item.name)
+                state_file = actual_dir / "state.json"
+                meta_file = actual_dir / "meta.json"
+                probe_file = actual_dir / "probe.json"
 
-            duration = 0.0
-            if probe_file.exists():
-                try:
-                    p = json.loads(probe_file.read_text(encoding="utf-8"))
-                    duration = float(p.get("format", {}).get("duration", 0.0))
-                except Exception:
-                    pass
+                video_name = item.name
+                created_at = ""
+                if meta_file.exists():
+                    try:
+                        m = json.loads(meta_file.read_text(encoding="utf-8"))
+                        video_name = m.get("video_name", video_name)
+                        created_at = m.get("created_at", "")
+                    except Exception:
+                        pass
 
-            job_info = {
-                "id": item.name,
-                "video_name": video_name,
-                "created_at": created_at,
-                "duration": duration,
-                "has_state": state_file.exists(),
-                "stages": {},
-                "is_active": (item.name == _active_job_id),
-                "has_video": (cfg.general.out_dir / f"{item.name}_vi.mp4").exists(),
-            }
-            if state_file.exists():
-                try:
-                    state_data = json.loads(state_file.read_text(encoding="utf-8"))
-                    job_info["stages"] = state_data.get("stages", {})
-                except Exception:
-                    pass
-            jobs.append(job_info)
+                duration = 0.0
+                if probe_file.exists():
+                    try:
+                        p = json.loads(probe_file.read_text(encoding="utf-8"))
+                        duration = float(p.get("format", {}).get("duration", 0.0))
+                    except Exception:
+                        pass
+
+                job_info = {
+                    "id": item.name,
+                    "video_name": video_name,
+                    "created_at": created_at,
+                    "duration": duration,
+                    "has_state": state_file.exists(),
+                    "stages": {},
+                    "is_active": (item.name == _active_job_id),
+                    "has_video": (cfg.general.out_dir / f"{item.name}_vi.mp4").exists(),
+                }
+                if state_file.exists():
+                    try:
+                        state_data = json.loads(state_file.read_text(encoding="utf-8"))
+                        job_info["stages"] = state_data.get("stages", {})
+                    except Exception:
+                        pass
+                jobs.append(job_info)
     jobs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return {"jobs": jobs, "active_job_id": _active_job_id}
 
@@ -773,7 +784,8 @@ def start_job(job_id: str, req: CreateJobRequest):
 async def run_job_stream(job_id: str, req: Optional[dict] = None):
     """Run pipeline and stream progress events until complete."""
     cfg = AppConfig.load()
-    ws_dir = cfg.general.workspace_dir / job_id
+    from dubstudio.paths import resolve_job_workspace
+    ws_dir = resolve_job_workspace(job_id)
     video_path = ws_dir / "input.mp4"
     if not video_path.exists():
         # Fallback candidate from workspace
@@ -847,7 +859,8 @@ async def run_job_stream(job_id: str, req: Optional[dict] = None):
 def get_job_detail(job_id: str):
     """Get metadata for a specific job."""
     cfg = AppConfig.load()
-    ws_dir = cfg.general.workspace_dir / job_id
+    from dubstudio.paths import resolve_job_workspace
+    ws_dir = resolve_job_workspace(job_id)
     if not ws_dir.exists():
         raise HTTPException(status_code=404, detail="Không tìm thấy tác vụ")
 
@@ -896,9 +909,17 @@ async def job_events(job_id: str):
 @app.get("/api/jobs/{job_id}/segments")
 def get_segments(job_id: str):
     """Get all subtitle segments for a job."""
-    cfg = AppConfig.load()
-    seg_file = cfg.general.workspace_dir / job_id / "segments.json"
+    from dubstudio.paths import resolve_job_workspace
+    ws_dir = resolve_job_workspace(job_id)
+    seg_file = ws_dir / "segments.json"
     if not seg_file.exists():
+        raw_file = ws_dir / "raw_segments.json"
+        if raw_file.exists():
+            try:
+                data = json.loads(raw_file.read_text(encoding="utf-8"))
+                return {"segments": data.get("segments", [])}
+            except Exception:
+                pass
         return {"segments": []}
     try:
         data = json.loads(seg_file.read_text(encoding="utf-8"))
@@ -910,8 +931,9 @@ def get_segments(job_id: str):
 @app.put("/api/jobs/{job_id}/segments/{seg_id}")
 def update_segment(job_id: str, seg_id: int, req: UpdateSegmentRequest):
     """Update timing (start/end), vi_text, tts_text, voice, speed, or voice_start of a segment."""
-    cfg = AppConfig.load()
-    seg_file = cfg.general.workspace_dir / job_id / "segments.json"
+    from dubstudio.paths import resolve_job_workspace
+    ws_dir = resolve_job_workspace(job_id)
+    seg_file = ws_dir / "segments.json"
     if not seg_file.exists():
         raise HTTPException(status_code=404, detail="Chưa có dữ liệu segments")
 
@@ -964,8 +986,9 @@ def update_segment(job_id: str, seg_id: int, req: UpdateSegmentRequest):
 @app.post("/api/jobs/{job_id}/segments/batch-update")
 def batch_update_segments(job_id: str, req: BatchUpdateSegmentsRequest):
     """Batch update multiple segments in segments.json atomically."""
-    cfg = AppConfig.load()
-    seg_file = cfg.general.workspace_dir / job_id / "segments.json"
+    from dubstudio.paths import resolve_job_workspace
+    ws_dir = resolve_job_workspace(job_id)
+    seg_file = ws_dir / "segments.json"
     if not seg_file.exists():
         raise HTTPException(status_code=404, detail="Chưa có dữ liệu segments")
 
@@ -1018,7 +1041,8 @@ def batch_update_segments(job_id: str, req: BatchUpdateSegmentsRequest):
 def create_segment(job_id: str, req: CreateSegmentRequest):
     """Create a new segment in segments.json."""
     cfg = AppConfig.load()
-    ws_dir = cfg.general.workspace_dir / job_id
+    from dubstudio.paths import resolve_job_workspace
+    ws_dir = resolve_job_workspace(job_id)
     ws_dir.mkdir(parents=True, exist_ok=True)
     seg_file = ws_dir / "segments.json"
     if seg_file.exists():
@@ -1076,8 +1100,8 @@ def create_segment(job_id: str, req: CreateSegmentRequest):
 @app.delete("/api/jobs/{job_id}/segments/{seg_id}")
 def delete_segment(job_id: str, seg_id: int):
     """Delete a segment from segments.json and remove its audio file."""
-    cfg = AppConfig.load()
-    ws_dir = cfg.general.workspace_dir / job_id
+    from dubstudio.paths import resolve_job_workspace
+    ws_dir = resolve_job_workspace(job_id)
     seg_file = ws_dir / "segments.json"
     if not seg_file.exists():
         raise HTTPException(status_code=404, detail="Chưa có dữ liệu segments")
@@ -1113,8 +1137,8 @@ def delete_segment(job_id: str, seg_id: int):
 @app.post("/api/jobs/{job_id}/segments/batch-delete")
 def batch_delete_segments(job_id: str, req: BatchDeleteSegmentsRequest):
     """Delete multiple segments from segments.json and remove their audio files."""
-    cfg = AppConfig.load()
-    ws_dir = cfg.general.workspace_dir / job_id
+    from dubstudio.paths import resolve_job_workspace
+    ws_dir = resolve_job_workspace(job_id)
     seg_file = ws_dir / "segments.json"
     if not seg_file.exists():
         raise HTTPException(status_code=404, detail="Chưa có dữ liệu segments")
@@ -1143,8 +1167,9 @@ def batch_delete_segments(job_id: str, req: BatchDeleteSegmentsRequest):
 @app.get("/api/jobs/{job_id}/orig-ranges")
 def get_orig_ranges(job_id: str):
     """Get list of original audio passthrough ranges."""
-    cfg = AppConfig.load()
-    f = cfg.general.workspace_dir / job_id / "orig_audio_ranges.json"
+    from dubstudio.paths import resolve_job_workspace
+    ws_dir = resolve_job_workspace(job_id)
+    f = ws_dir / "orig_audio_ranges.json"
     if f.exists():
         try:
             return {"ranges": json.loads(f.read_text(encoding="utf-8"))}
@@ -1156,8 +1181,8 @@ def get_orig_ranges(job_id: str):
 @app.post("/api/jobs/{job_id}/orig-ranges")
 def save_orig_ranges(job_id: str, req: SaveOrigRangesRequest):
     """Save original audio passthrough ranges."""
-    cfg = AppConfig.load()
-    ws = cfg.general.workspace_dir / job_id
+    from dubstudio.paths import resolve_job_workspace
+    ws = resolve_job_workspace(job_id)
     ws.mkdir(parents=True, exist_ok=True)
     f = ws / "orig_audio_ranges.json"
     dumped = [r.model_dump() for r in req.ranges]
@@ -1171,8 +1196,8 @@ def merge_segments(job_id: str, req: MergeSegmentsRequest):
     if len(req.seg_ids) < 2:
         raise HTTPException(status_code=400, detail="Cần ít nhất 2 đoạn thoại để gộp")
 
-    cfg = AppConfig.load()
-    ws_dir = cfg.general.workspace_dir / job_id
+    from dubstudio.paths import resolve_job_workspace
+    ws_dir = resolve_job_workspace(job_id)
     seg_file = ws_dir / "segments.json"
     if not seg_file.exists():
         raise HTTPException(status_code=404, detail="Chưa có dữ liệu segments")
@@ -1213,10 +1238,11 @@ def merge_segments(job_id: str, req: MergeSegmentsRequest):
 def split_segment(job_id: str, req: SplitSegmentRequest, seg_id: Optional[int] = None):
     """Split a segment into two segments proportionally by word count."""
     target_id = seg_id if seg_id is not None else req.seg_id
-    cfg = AppConfig.load()
-    ws_dir = cfg.general.workspace_dir / job_id
+    from dubstudio.paths import resolve_job_workspace
+    ws_dir = resolve_job_workspace(job_id)
     seg_file = ws_dir / "segments.json"
     if not seg_file.exists():
+        raise HTTPException(status_code=404, detail="Chưa có dữ liệu segments")
         raise HTTPException(status_code=404, detail="Chưa có dữ liệu segments")
 
     data = json.loads(seg_file.read_text(encoding="utf-8"))

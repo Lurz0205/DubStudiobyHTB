@@ -103,11 +103,40 @@ class AppConfig(BaseSettings):
     @classmethod
     def load(cls, config_path: Optional[Path] = None, overrides: Optional[Dict[str, Any]] = None) -> "AppConfig":
         """Load configuration from TOML file, environment, and optional runtime overrides."""
-        cfg_path = config_path or (get_app_dir() / "config" / "default.toml")
+        if config_path:
+            cfg_path = config_path
+        else:
+            candidates = [
+                get_app_dir() / "config" / "default.toml",
+                get_app_dir() / "_internal" / "config" / "default.toml",
+            ]
+            cfg_path = next((c for c in candidates if c.exists()), candidates[0])
+
         data: Dict[str, Any] = {}
         if cfg_path.exists():
             with open(cfg_path, "rb") as f:
                 data = tomllib.load(f)
+
+        # Resolve path strings into absolute paths using centralized helpers
+        if "general" in data and isinstance(data["general"], dict):
+            g = data["general"]
+            ws_val = g.get("workspace_dir")
+            if ws_val == "workspace" or not ws_val:
+                g["workspace_dir"] = get_workspace_dir()
+            elif not Path(ws_val).is_absolute():
+                g["workspace_dir"] = (get_app_dir() / ws_val).resolve()
+
+            out_val = g.get("out_dir")
+            if out_val == "out" or not out_val:
+                g["out_dir"] = get_out_dir()
+            elif not Path(out_val).is_absolute():
+                g["out_dir"] = (get_app_dir() / out_val).resolve()
+
+            mod_val = g.get("models_dir")
+            if mod_val == "models" or not mod_val:
+                g["models_dir"] = get_models_dir()
+            elif not Path(mod_val).is_absolute():
+                g["models_dir"] = (get_app_dir() / mod_val).resolve()
 
         # Apply environment and .env overrides for user preferences
         import os

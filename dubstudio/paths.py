@@ -158,3 +158,71 @@ def resolve_tool(name: str, custom_path: Optional[str] = None) -> str:
 
     # Fallback to name
     return name
+
+
+def resolve_job_workspace(job_id: str) -> Path:
+    """
+    Resolve the directory containing a job, checking common candidate locations.
+    Prioritizes directory containing the freshest segments.json, or active job artifacts.
+    """
+    if not job_id:
+        return get_workspace_dir()
+
+    candidates = [
+        get_user_base_dir() / "workspace" / job_id,
+        get_app_dir() / "workspace" / job_id,
+        Path.cwd() / "workspace" / job_id,
+        Path("dist/DubStudio/workspace") / job_id,
+        Path("workspace") / job_id,
+    ]
+    unique_candidates = []
+    seen = set()
+    for c in candidates:
+        try:
+            r = c.resolve()
+            if r not in seen:
+                seen.add(r)
+                unique_candidates.append(c)
+        except Exception:
+            pass
+
+    # 1. Prefer directory that contains segments.json (sorted by freshest mtime)
+    seg_candidates = [
+        c for c in unique_candidates
+        if c.exists() and (c / "segments.json").exists()
+    ]
+    if seg_candidates:
+        try:
+            seg_candidates.sort(key=lambda c: (c / "segments.json").stat().st_mtime, reverse=True)
+            return seg_candidates[0].resolve()
+        except Exception:
+            return seg_candidates[0].resolve()
+
+    # 2. Check for intermediate outputs
+    for k in ("units.json", "raw_segments.json", "state.json", "input.mp4", "meta.json"):
+        for c in unique_candidates:
+            try:
+                if c.exists() and (c / k).exists():
+                    return c.resolve()
+            except Exception:
+                pass
+
+    # 3. Check any existing directory
+    for c in unique_candidates:
+        try:
+            if c.exists() and c.is_dir():
+                return c.resolve()
+        except Exception:
+            pass
+
+    # 4. Fallback to default centralized workspace
+    fallback = get_workspace_dir() / job_id
+    _mkdir_retry(fallback)
+    return fallback.resolve()
+
+
+def resolve_job_file(job_id: str, filename: str) -> Path:
+    """Resolve a specific file inside a job's workspace."""
+    ws = resolve_job_workspace(job_id)
+    return ws / filename
+

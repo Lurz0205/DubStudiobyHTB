@@ -854,19 +854,21 @@ class StudioPage(QWidget):
         # 3. Fallback to original input.mp4 if not yet dubbed
         jid = self._current_job_id or ""
         video_path = None
-        ws_preview = Path("workspace") / jid / "preview_dubbed.mp4"
-        rendered_mp4 = Path("out") / f"{jid}_vi.mp4"
-        ws_input = Path("workspace") / jid / "input.mp4"
+        from dubstudio.paths import resolve_job_workspace, get_out_dir
+        ws_dir = resolve_job_workspace(jid) if jid else None
+        ws_preview = (ws_dir / "preview_dubbed.mp4") if ws_dir else None
+        rendered_mp4 = get_out_dir() / f"{jid}_vi.mp4"
+        ws_input = (ws_dir / "input.mp4") if ws_dir else None
         orig_src = Path(job.get("video_path", "")) if job.get("video_path") else None
 
         is_rendered = False
-        if ws_preview.exists():
+        if ws_preview and ws_preview.exists():
             video_path = str(ws_preview.resolve())
             is_rendered = True
         elif rendered_mp4.exists():
             video_path = str(rendered_mp4.resolve())
             is_rendered = True
-        elif ws_input.exists():
+        elif ws_input and ws_input.exists():
             video_path = str(ws_input.resolve())
         elif orig_src and orig_src.exists():
             video_path = str(orig_src.resolve())
@@ -874,7 +876,6 @@ class StudioPage(QWidget):
         if video_path:
             self._video_player.load_video(video_path)
             # Sync audio stems (Vietnamese voice, BGM, vocals) if available
-            ws_dir = Path("workspace") / jid if jid else None
             self._video_player.setup_job_audio(
                 workspace_dir=ws_dir,
                 is_rendered_video=is_rendered,
@@ -914,7 +915,8 @@ class StudioPage(QWidget):
 
         # Update words_per_line default from probe.json / job_config.json
         if hasattr(self, "_spin_words_per_line") and jid:
-            ws_dir = Path("workspace") / jid
+            from dubstudio.paths import resolve_job_workspace
+            ws_dir = resolve_job_workspace(jid)
             conf_file = ws_dir / "job_config.json"
             set_val = False
             if conf_file.exists():
@@ -946,8 +948,9 @@ class StudioPage(QWidget):
         # Update gender and single-voice controls from job_config.json
         if jid:
             from dubstudio.config import AppConfig
+            from dubstudio.paths import resolve_job_workspace
             cfg = AppConfig.load()
-            conf_file = Path("workspace") / jid / "job_config.json"
+            conf_file = resolve_job_workspace(jid) / "job_config.json"
             c_data = {}
             if conf_file.exists():
                 try:
@@ -1159,9 +1162,8 @@ class StudioPage(QWidget):
             return
 
         # Validate workspace input file
-        from dubstudio.config import AppConfig
-        cfg = AppConfig.load()
-        ws_dir = cfg.general.workspace_dir / self._current_job_id
+        from dubstudio.paths import resolve_job_workspace
+        ws_dir = resolve_job_workspace(self._current_job_id)
         in_vid = ws_dir / "input.mp4"
         if not in_vid.exists():
             QMessageBox.critical(

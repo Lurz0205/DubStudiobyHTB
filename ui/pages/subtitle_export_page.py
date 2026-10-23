@@ -562,9 +562,11 @@ class SubtitleExportPage(QWidget):
         def _on_loaded(job: dict, segs: list):
             self._segments = segs or []
             # Prioritize: ws_input (clean video for styling & live multi-track preview) > job["video_path"] > ws_preview > rendered
-            rendered = Path("out") / f"{job_id}_vi.mp4"
-            ws_preview = Path("workspace") / job_id / "preview_dubbed.mp4"
-            ws_input = Path("workspace") / job_id / "input.mp4"
+            from dubstudio.paths import resolve_job_workspace, get_out_dir
+            ws_dir = resolve_job_workspace(job_id)
+            rendered = get_out_dir() / f"{job_id}_vi.mp4"
+            ws_preview = ws_dir / "preview_dubbed.mp4"
+            ws_input = ws_dir / "input.mp4"
             target_vid = None
             if ws_input.exists():
                 target_vid = str(ws_input.resolve())
@@ -582,7 +584,7 @@ class SubtitleExportPage(QWidget):
                 self._video_player.set_overlay_preview_visible(True)
 
             # Load saved style if exists
-            style_file = Path("workspace") / job_id / "style.json"
+            style_file = ws_dir / "style.json"
             if style_file.exists():
                 try:
                     loaded_style = json.loads(style_file.read_text(encoding="utf-8"))
@@ -590,7 +592,7 @@ class SubtitleExportPage(QWidget):
                 except Exception:
                     pass
             # Also load saved mix settings (4 audio stems)
-            mix_file = Path("workspace") / job_id / "mix_settings.json"
+            mix_file = ws_dir / "mix_settings.json"
             if mix_file.exists():
                 try:
                     loaded_mix = json.loads(mix_file.read_text(encoding="utf-8"))
@@ -608,10 +610,11 @@ class SubtitleExportPage(QWidget):
         """Prepare video player with 4 multi-track audio stems."""
         if not self._current_job_id:
             return
-        ws_dir = Path("workspace") / self._current_job_id
+        from dubstudio.paths import resolve_job_workspace, get_out_dir
+        ws_dir = resolve_job_workspace(self._current_job_id)
         if not is_rendered_video:
             ws_input = ws_dir / "input.mp4"
-            rendered = Path("out") / f"{self._current_job_id}_vi.mp4"
+            rendered = get_out_dir() / f"{self._current_job_id}_vi.mp4"
             curr_src = getattr(self._video_player, "_video_path", None)
             if ws_input.exists() and curr_src and rendered.exists():
                 try:
@@ -1016,10 +1019,8 @@ class SubtitleExportPage(QWidget):
 
             # 2. Workspace style and mix_settings
             try:
-                from dubstudio.paths import get_workspace_dir
-                ws_dir = Path("workspace") / job_id
-                if not ws_dir.exists():
-                    ws_dir = get_workspace_dir() / job_id
+                from dubstudio.paths import resolve_job_workspace
+                ws_dir = resolve_job_workspace(job_id)
                 ws_dir.mkdir(parents=True, exist_ok=True)
 
                 ws_style = ws_dir / "style.json"
@@ -1123,14 +1124,9 @@ class SubtitleExportPage(QWidget):
         self._save_style_to_job()
 
         # Find best candidate video to send to merge page
-        from dubstudio.paths import get_workspace_dir, get_out_dir
-        ws_dir = Path("workspace") / self._current_job_id
-        if not ws_dir.exists():
-            ws_dir = get_workspace_dir() / self._current_job_id
-
-        rendered_mp4 = Path("out") / f"{self._current_job_id}_vi.mp4"
-        if not rendered_mp4.exists():
-            rendered_mp4 = get_out_dir() / f"{self._current_job_id}_vi.mp4"
+        from dubstudio.paths import resolve_job_workspace, get_out_dir
+        ws_dir = resolve_job_workspace(self._current_job_id)
+        rendered_mp4 = get_out_dir() / f"{self._current_job_id}_vi.mp4"
 
         prev_dub = ws_dir / "preview_dubbed.mp4"
         in_mp4 = ws_dir / "input.mp4"
@@ -1175,7 +1171,8 @@ class SubtitleExportPage(QWidget):
             return
 
         # Check if any segments are missing TTS audio and confirm with user
-        ws_dir = Path("workspace") / self._current_job_id
+        from dubstudio.paths import resolve_job_workspace
+        ws_dir = resolve_job_workspace(self._current_job_id)
         seg_file = ws_dir / "segments.json"
         if seg_file.exists():
             try:
@@ -1211,7 +1208,7 @@ class SubtitleExportPage(QWidget):
 
         # Invalidate old render stage and mix stage in state.json so it always re-mixes & re-renders with new style/audio
         try:
-            ws_state = Path("workspace") / self._current_job_id / "state.json"
+            ws_state = ws_dir / "state.json"
             if ws_state.exists():
                 st_data = json.loads(ws_state.read_text(encoding="utf-8"))
                 if "stages" in st_data:
