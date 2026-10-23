@@ -13,12 +13,18 @@ from dubstudio.packaging import get_user_data_dir, is_packaged
 from dubstudio.version import APP_VERSION
 
 def _load_default_manifest() -> Dict[str, Any]:
-    cfg_file = Path("config") / "components.json"
-    if cfg_file.exists():
-        try:
-            return json.loads(cfg_file.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+    from dubstudio.paths import get_resource_dir, get_app_dir
+    candidates = [
+        get_app_dir() / "config" / "components.json",
+        get_resource_dir() / "config" / "components.json",
+        Path("config") / "components.json",
+    ]
+    for cfg_file in candidates:
+        if cfg_file.exists():
+            try:
+                return json.loads(cfg_file.read_text(encoding="utf-8"))
+            except Exception:
+                pass
     return {
         "feed_version": 2,
         "packages": [
@@ -376,10 +382,12 @@ def is_component_ready(pkg_id: str) -> Tuple[bool, str]:
     # 2. Check installed.json manifest registry
     installed = get_installed_components()
     entry = installed.get(pkg_id)
-    if entry:
-        path = Path(entry.get("path", ""))
-        if path.exists():
-            return True, "Sẵn sàng"
+    if entry and entry.get("path"):
+        raw_p = str(entry["path"]).strip()
+        if raw_p:
+            path = Path(raw_p)
+            if path.exists():
+                return True, "Sẵn sàng"
 
     return False, "Chưa tải"
 
@@ -416,6 +424,27 @@ def download_component_file(
         dest_dir = get_user_data_dir() / target_rel
 
     dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # Specialized multi-file snapshot download for SenseVoice-Small
+    if pkg_id == "sensevoice_small":
+        try:
+            from huggingface_hub import snapshot_download
+            snapshot_download(
+                "FunAudioLLM/SenseVoiceSmall",
+                local_dir=str(dest_dir.resolve()),
+                local_dir_use_symlinks=False,
+            )
+            installed = get_installed_components()
+            installed[pkg_id] = {
+                "version": int(pkg.get("version", 1)),
+                "path": str(dest_dir.resolve()),
+                "installed_at": time.time(),
+                "status": "ready",
+            }
+            save_installed_components(installed)
+            return True
+        except Exception:
+            pass
 
     # Determine filename
     file_name = url.split("?")[0].split("/")[-1]

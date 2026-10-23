@@ -28,6 +28,16 @@ def get_app_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def get_resource_dir() -> Path:
+    """Return directory where bundled assets (config, ui, _internal) are located."""
+    if hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS).resolve()
+    exe_internal = Path(sys.executable).parent / "_internal"
+    if exe_internal.exists():
+        return exe_internal.resolve()
+    return get_app_dir()
+
+
 def get_user_base_dir() -> Path:
     """Return %LocalAppData%\\DubStudio isolated user root."""
     if sys.platform == "win32":

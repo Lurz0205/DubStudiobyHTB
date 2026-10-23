@@ -702,12 +702,16 @@ class SettingsPage(QWidget):
             if w:
                 w.deleteLater()
 
-        manifest_file = get_app_dir() / "config" / "components.json"
-        if not manifest_file.exists():
-            manifest_file = Path("config/components.json")
+        from dubstudio.paths import get_resource_dir, get_app_dir
+        candidates = [
+            get_app_dir() / "config" / "components.json",
+            get_resource_dir() / "config" / "components.json",
+            Path("config/components.json"),
+        ]
+        manifest_file = next((c for c in candidates if c.exists()), None)
 
         packages = []
-        if manifest_file.exists():
+        if manifest_file:
             try:
                 data = json.loads(manifest_file.read_text(encoding="utf-8"))
                 packages = data.get("packages", [])
