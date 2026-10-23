@@ -146,26 +146,35 @@ if ref_update.status_code != 200:
 
 print(f"\n[THANH CONG] Toan bo ma nguon da duoc dong bo len branch main (Commit: {new_commit_sha[:7]})!", flush=True)
 
-# 8. Create or recreate tag v1.1.0 to trigger GitHub Actions build_release.yml
-tag_name = "v1.1.0"
-tag_ref = f"refs/tags/{tag_name}"
-tag_payload = {"ref": tag_ref, "sha": new_commit_sha}
+# 8. Create tag ONLY if explicitly requested via command line (e.g. --tag v1.1.1)
+import sys
+requested_tag = None
+for i, arg in enumerate(sys.argv):
+    if arg == "--tag" and i + 1 < len(sys.argv):
+        requested_tag = sys.argv[i + 1]
+    elif arg.startswith("--tag="):
+        requested_tag = arg.split("=", 1)[1]
 
-# Delete existing tag ref first if it exists to ensure a fresh tag creation event
-del_resp = session.delete(f"{api_base}/git/refs/tags/{tag_name}")
-if del_resp.status_code in (204, 200):
-    print(f"Deleted existing Git Tag {tag_name} ref on remote to prepare for fresh trigger.", flush=True)
-    time.sleep(1.0)
+if requested_tag:
+    tag_name = requested_tag if requested_tag.startswith("v") else f"v{requested_tag}"
+    tag_ref = f"refs/tags/{tag_name}"
+    tag_payload = {"ref": tag_ref, "sha": new_commit_sha}
 
-tag_resp = session.post(f"{api_base}/git/refs", json=tag_payload)
-if tag_resp.status_code == 201:
-    print(f"[THANH CONG] Da tao Git Tag {tag_name} tren GitHub! GitHub Actions se tu dong build va release.", flush=True)
-else:
-    # Fallback to force update if delete/create was delayed
-    patch_resp = session.patch(f"{api_base}/git/refs/tags/{tag_name}", json={"sha": new_commit_sha, "force": True})
-    if patch_resp.status_code == 200:
-        print(f"[THANH CONG] Da cap nhat Git Tag {tag_name} ve commit {new_commit_sha[:7]}!", flush=True)
+    del_resp = session.delete(f"{api_base}/git/refs/tags/{tag_name}")
+    if del_resp.status_code in (204, 200):
+        print(f"Deleted existing Git Tag {tag_name} ref on remote to prepare for fresh trigger.", flush=True)
+        time.sleep(1.0)
+
+    tag_resp = session.post(f"{api_base}/git/refs", json=tag_payload)
+    if tag_resp.status_code == 201:
+        print(f"[THANH CONG] Da tao Git Tag {tag_name} tren GitHub! GitHub Actions se tu dong build va release.", flush=True)
     else:
-        print(f"Notice: Khong the tao hoac cap nhat tag {tag_name}: {tag_resp.status_code} {tag_resp.text}", flush=True)
+        patch_resp = session.patch(f"{api_base}/git/refs/tags/{tag_name}", json={"sha": new_commit_sha, "force": True})
+        if patch_resp.status_code == 200:
+            print(f"[THANH CONG] Da cap nhat Git Tag {tag_name} ve commit {new_commit_sha[:7]}!", flush=True)
+        else:
+            print(f"Notice: Khong the tao hoac cap nhat tag {tag_name}: {tag_resp.status_code} {tag_resp.text}", flush=True)
+else:
+    print("[THONG BAO] Ma nguon da cap nhat len branch main. KHONG tao tag release moi (dung co --tag <ver> neu muon phat hanh).", flush=True)
 
 
