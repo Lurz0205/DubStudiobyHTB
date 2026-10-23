@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import threading
 import time
 from typing import Any, Dict, List, Optional
 import httpx
@@ -412,6 +413,16 @@ def is_component_ready(pkg_id: str) -> Tuple[bool, str]:
     return False, "Chưa tải"
 
 
+_GLOBAL_DOWNLOADING_PKGS = set()
+_GLOBAL_DOWNLOADING_LOCK = threading.Lock()
+
+
+def is_pkg_downloading(pkg_id: str) -> bool:
+    """Return True if the specified component is actively downloading in any background thread."""
+    with _GLOBAL_DOWNLOADING_LOCK:
+        return pkg_id in _GLOBAL_DOWNLOADING_PKGS
+
+
 def download_component_file(
     pkg: Dict[str, Any],
     progress_cb=None,
@@ -421,11 +432,37 @@ def download_component_file(
     Download component with responsive chunk streaming and instant cancellation.
     Atomically installs to dest_dir only upon 100% successful verification.
     Guarantees no leftover garbage or partially-written models on disk.
+    Enforces a global download lock to prevent duplicate parallel downloads.
     """
     import os
     import shutil
     import requests
     from dubstudio.paths import get_user_data_dir, get_models_dir
+
+    pkg_id = pkg["id"]
+
+    with _GLOBAL_DOWNLOADING_LOCK:
+        if pkg_id in _GLOBAL_DOWNLOADING_PKGS:
+            raise RuntimeError(f"Gói '{pkg.get('name', pkg_id)}' đang được tải ngầm, không thể khởi chạy 2 tiến trình tải đồng thời!")
+        _GLOBAL_DOWNLOADING_PKGS.add(pkg_id)
+
+    try:
+        return _do_download_component_file(pkg, dest_models_dir=get_models_dir(), user_data_dir=get_user_data_dir(), progress_cb=progress_cb, cancel_flag=cancel_flag)
+    finally:
+        with _GLOBAL_DOWNLOADING_LOCK:
+            _GLOBAL_DOWNLOADING_PKGS.discard(pkg_id)
+
+
+def _do_download_component_file(
+    pkg: Dict[str, Any],
+    dest_models_dir: Path,
+    user_data_dir: Path,
+    progress_cb=None,
+    cancel_flag=None,
+) -> bool:
+    import os
+    import shutil
+    import requests
 
     pkg_id = pkg["id"]
     target_rel = pkg.get("target_dir", "models")
@@ -434,12 +471,12 @@ def download_component_file(
 
     # Determine destination folder
     if target_rel.startswith("models"):
-        dest_dir = get_models_dir()
+        dest_dir = dest_models_dir
         sub = target_rel.replace("models", "").strip("/\\")
         if sub:
             dest_dir = dest_dir / sub
     else:
-        dest_dir = get_user_data_dir() / target_rel
+        dest_dir = user_data_dir / target_rel
 
     dest_dir.mkdir(parents=True, exist_ok=True)
 

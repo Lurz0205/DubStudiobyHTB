@@ -57,6 +57,15 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
         model_choice = str(cfg.asr.model_size or "large-v3").lower().strip()
 
         if "sensevoice" in model_choice:
+            from dubstudio.components import is_component_ready
+            ready, status_msg = is_component_ready("sensevoice_small")
+            if not ready:
+                raise DubError(
+                    code="MODEL_NOT_FOUND",
+                    user_message_vi="Mô hình nhận diện SenseVoice-Small chưa được tải xong (hoặc đang tải dở dang).",
+                    hint_vi="Vui lòng chuyển sang tab 'Cài đặt' -> mục 'Quản lý Gói mô hình AI' để tải hoàn tất mô hình SenseVoice-Small trước khi tạo phụ đề.",
+                )
+
             emit_event(stage_name, 10.0, f"Khởi tạo SenseVoice-Small ({device})...")
             from funasr import AutoModel
             from funasr.utils.postprocess_utils import rich_transcription_postprocess
@@ -70,7 +79,10 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
                 Path(sys.executable).parent / "models" / "SenseVoiceSmall",
                 Path(sys.executable).parent.parent / "models" / "SenseVoiceSmall",
             ]
-            model_dir = next((c for c in candidates if c.exists()), None)
+            model_dir = next(
+                (c for c in candidates if (c / "model.pt").is_file() and (c / "model.pt").stat().st_size > 100 * 1024 * 1024),
+                None
+            )
             vad_kwargs = {
                 "max_single_segment_time": 6000,
                 "max_end_silence_time": 400,
@@ -79,8 +91,8 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
             if not model_dir:
                 raise DubError(
                     code="MODEL_NOT_FOUND",
-                    user_message_vi="Không tìm thấy mô hình SenseVoiceSmall cục bộ trên máy.",
-                    hint_vi="Vui lòng đặt thư mục SenseVoiceSmall vào thư mục models/ hoặc kiểm tra lại đường dẫn trong Cài đặt.",
+                    user_message_vi="Không tìm thấy tệp trọng số SenseVoice-Small (model.pt > 100MB) cục bộ trên máy.",
+                    hint_vi="Vui lòng chuyển sang tab Cài đặt để tải lại gói SenseVoice-Small.",
                 )
 
             asr_model = AutoModel(
@@ -159,6 +171,15 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
                 Path(f"models/models--Systran--faster-whisper-{model_size}"),
                 Path(f"models/{model_size}"),
             ]
+            from dubstudio.components import is_component_ready
+            ready, _ = is_component_ready("whisper_large_v3")
+            if not ready:
+                raise DubError(
+                    code="MODEL_NOT_FOUND",
+                    user_message_vi=f"Mô hình faster-whisper '{model_size}' chưa được tải xong (hoặc đang tải dở dang).",
+                    hint_vi="Vui lòng chuyển sang tab 'Cài đặt' -> mục 'Quản lý Gói mô hình AI' để tải mô hình faster-whisper.",
+                )
+
             whisper_target = cfg.asr.model_size
             for cand in local_candidates:
                 if cand.exists() and cand.is_dir():

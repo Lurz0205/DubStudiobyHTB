@@ -14,14 +14,14 @@ Toàn bộ các mô hình AI hạng nặng (tách nhạc nền/giọng nói Kim_
 ## 📥 Tải bản cài đặt sẵn cho Windows (Khuyến nghị)
 
 Nếu bạn không muốn cài đặt Python hoặc cấu hình môi trường phức tạp:
-👉 **[Tải xuống bản cài đặt DubStudio v1.1.0 Beta (DubStudio-win-Setup.exe)](https://github.com/Lurz0205/DubStudiobyHTB/releases/tag/v1.1.0)**
+👉 **[Tải xuống bản cài đặt DubStudio v1.0.0 Stable (DubStudio-win-Setup.exe)](https://github.com/Lurz0205/DubStudiobyHTB/releases/tag/v1.0.0)**
 
 - Tải về và nhấp đúp file setup để cài đặt trong vòng 10 giây.
 - Ứng dụng tự động quản lý cập nhật và tải các thành phần AI khi cần.
 
 ---
 
-## 🌟 Toàn bộ tính năng nổi bật
+## 🌟 Toàn cảnh tính năng nổi bật trên bản v1.0.0 Stable
 
 ### 1. Khoanh vùng Giữ âm gốc độc lập (Original Audio Passthrough)
 - **Tách biệt 100% với phụ đề**: Lưu trữ độc lập trên timeline tại Track 3 chuyên biệt màu cam (`Âm gốc 🎵`), không bị ảnh hưởng khi chỉnh sửa hoặc xóa phụ đề.

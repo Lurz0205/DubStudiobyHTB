@@ -32,10 +32,17 @@ def test_bundled_tools_resolution():
 
 
 def test_check_system_prerequisites():
-    """Verify prerequisite checks pass on configured environment."""
-    ok, title, msg = check_system_prerequisites(task="subtitles")
-    assert ok is True
-    assert title == ""
+    """Verify prerequisite checks pass when components are ready, and fail gracefully when missing."""
+    from unittest.mock import patch
+    with patch("dubstudio.components.is_component_ready", return_value=(True, "Đã sẵn sàng")):
+        ok, title, msg = check_system_prerequisites(task="subtitles")
+        assert ok is True
+        assert title == ""
+
+    with patch("dubstudio.components.is_component_ready", return_value=(False, "Chưa tải")):
+        ok, title, msg = check_system_prerequisites(task="subtitles")
+        assert ok is False
+        assert "Chưa tải mô hình" in title
 
 
 def test_collect_system_summary_structure():

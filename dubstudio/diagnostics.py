@@ -48,10 +48,42 @@ def check_system_prerequisites(task: str = "subtitles") -> Tuple[bool, str, str]
                 )
 
     # 3. Check Models depending on task
-    from dubstudio.components import is_component_ready
+    from dubstudio.components import is_component_ready, is_pkg_downloading
+    from dubstudio.config import AppConfig
+
+    cfg = AppConfig.load()
+    asr_val = os.getenv("WHISPER_MODEL", "") or os.getenv("ASR_MODEL", "") or cfg.asr.model_size or "sensevoice-small"
+    is_sensevoice = "sensevoice" in str(asr_val).lower()
+    asr_pkg = "sensevoice_small" if is_sensevoice else "whisper_large_v3"
+    asr_name = "SenseVoice-Small" if is_sensevoice else "faster-whisper large-v3"
+
+    if task in ("subtitles", "all"):
+        if is_pkg_downloading(asr_pkg):
+            return (
+                False,
+                "Mô hình nhận diện đang tải dở",
+                f"Mô hình '{asr_name}' đang trong quá trình tải về máy.\n\n"
+                f"⏳ Vui lòng đợi quá trình tải hoàn tất 100% trước khi bấm tạo phụ đề!",
+            )
+        ok, _ = is_component_ready(asr_pkg)
+        if not ok:
+            return (
+                False,
+                "Chưa tải mô hình nhận diện giọng nói",
+                f"DubStudio chưa tìm thấy mô hình nhận diện '{asr_name}' trên đĩa.\n\n"
+                f"👉 Vui lòng chuyển sang tab 'Cài đặt' -> mục 'Quản lý Gói mô hình AI' để tải hoàn tất mô hình trước khi tạo phụ đề.",
+            )
+
     if task in ("dub", "all"):
+        if is_pkg_downloading("vieneu_tts_voices"):
+            return (
+                False,
+                "Mô hình giọng đọc đang tải dở",
+                "Mô hình giọng đọc VieNeu-TTS v3 đang trong quá trình tải về máy.\n\n"
+                "⏳ Vui lòng đợi quá trình tải hoàn tất 100% trước khi bấm tạo lồng tiếng!",
+            )
         ok, _ = is_component_ready("vieneu_tts_voices")
-        if not ok and is_packaged():
+        if not ok:
             return (
                 False,
                 "Chưa tải mô hình giọng đọc thuyết minh tiếng Việt",

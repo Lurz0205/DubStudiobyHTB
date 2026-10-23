@@ -120,7 +120,7 @@ else:
 
 # 6. Create commit
 commit_payload = {
-    "message": "Release v1.1.0: Complete DubStudio source code for CI/CD",
+    "message": "Fix(asr, diagnostics): Verify component readiness and prevent parallel download race conditions",
     "tree": new_tree_sha,
     "parents": [parent_commit_sha],
 }
@@ -146,18 +146,26 @@ if ref_update.status_code != 200:
 
 print(f"\n[THANH CONG] Toan bo ma nguon da duoc dong bo len branch main (Commit: {new_commit_sha[:7]})!", flush=True)
 
-# 8. Create or update tag v1.1.0 to trigger GitHub Actions build_release.yml
+# 8. Create or recreate tag v1.1.0 to trigger GitHub Actions build_release.yml
 tag_name = "v1.1.0"
 tag_ref = f"refs/tags/{tag_name}"
 tag_payload = {"ref": tag_ref, "sha": new_commit_sha}
+
+# Delete existing tag ref first if it exists to ensure a fresh tag creation event
+del_resp = session.delete(f"{api_base}/git/refs/tags/{tag_name}")
+if del_resp.status_code in (204, 200):
+    print(f"Deleted existing Git Tag {tag_name} ref on remote to prepare for fresh trigger.", flush=True)
+    time.sleep(1.0)
+
 tag_resp = session.post(f"{api_base}/git/refs", json=tag_payload)
 if tag_resp.status_code == 201:
     print(f"[THANH CONG] Da tao Git Tag {tag_name} tren GitHub! GitHub Actions se tu dong build va release.", flush=True)
-elif tag_resp.status_code == 422:
+else:
+    # Fallback to force update if delete/create was delayed
     patch_resp = session.patch(f"{api_base}/git/refs/tags/{tag_name}", json={"sha": new_commit_sha, "force": True})
     if patch_resp.status_code == 200:
         print(f"[THANH CONG] Da cap nhat Git Tag {tag_name} ve commit {new_commit_sha[:7]}!", flush=True)
     else:
-        print(f"Notice: Khong the cap nhat tag {tag_name}: {patch_resp.status_code} {patch_resp.text}", flush=True)
+        print(f"Notice: Khong the tao hoac cap nhat tag {tag_name}: {tag_resp.status_code} {tag_resp.text}", flush=True)
 
 

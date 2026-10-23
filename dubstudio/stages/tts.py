@@ -97,6 +97,15 @@ def run(job: JobContext, cfg: AppConfig) -> None:
 
     emit_event(stage_name, 5.0, f"Phát hiện {len(dirty_segs)}/{len(needed_segs)} câu cần tạo mới hoặc cập nhật âm thanh...")
 
+    from dubstudio.components import is_component_ready
+    ready, _ = is_component_ready("vieneu_tts_voices")
+    if not ready:
+        raise DubError(
+            code="MODEL_NOT_FOUND",
+            user_message_vi="Mô hình giọng đọc VieNeu-TTS v3 chưa được tải xong (hoặc đang tải dở dang).",
+            hint_vi="Vui lòng chuyển sang tab 'Cài đặt' -> mục 'Quản lý Gói mô hình AI' để tải mô hình VieNeu-TTS trước khi tạo lồng tiếng.",
+        )
+
     import os
     import site
     import sys
