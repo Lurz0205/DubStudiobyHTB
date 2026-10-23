@@ -316,6 +316,8 @@ class MainWindow(QMainWindow):
             btn.style().polish(btn)
 
     def _on_nav_clicked(self, page_id: int):
+        if self._pages.currentIndex() == page_id:
+            return
         # Pause video players when switching away
         if hasattr(self, "_studio_page") and hasattr(self._studio_page, "_video_player"):
             try:
