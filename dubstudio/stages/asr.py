@@ -76,13 +76,23 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
                 "max_end_silence_time": 400,
                 "speech_noise_thres": 0.6,
             }
-            asr_model = AutoModel(
-                model=str(model_dir.resolve()) if model_dir else "FunAudioLLM/SenseVoiceSmall",
-                vad_model="fsmn-vad",
-                vad_kwargs=vad_kwargs,
-                device=device if device == "cpu" else "cuda:0",
-                disable_update=True,
-            )
+            if model_dir:
+                asr_model = AutoModel(
+                    model=str(model_dir.resolve()),
+                    vad_model="fsmn-vad",
+                    vad_kwargs=vad_kwargs,
+                    device=device if device == "cpu" else "cuda:0",
+                    disable_update=True,
+                )
+            else:
+                asr_model = AutoModel(
+                    model="iic/SenseVoiceSmall",
+                    hub="ms",
+                    vad_model="fsmn-vad",
+                    vad_kwargs=vad_kwargs,
+                    device=device if device == "cpu" else "cuda:0",
+                    disable_update=True,
+                )
 
             emit_event(stage_name, 40.0, "Đang bóc tách phân đoạn thoại tiếng Trung qua SenseVoice...")
             res = asr_model.generate(
