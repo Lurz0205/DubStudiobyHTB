@@ -450,12 +450,32 @@ def download_component_file(
 
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    # Specialized multi-file snapshot download for SenseVoice-Small
+    # Specialized multi-file snapshot download for SenseVoice-Small & Whisper-large-v3
     if pkg_id == "sensevoice_small":
         try:
             from huggingface_hub import snapshot_download
             snapshot_download(
                 "FunAudioLLM/SenseVoiceSmall",
+                local_dir=str(dest_dir.resolve()),
+                local_dir_use_symlinks=False,
+            )
+            installed = get_installed_components()
+            installed[pkg_id] = {
+                "version": int(pkg.get("version", 1)),
+                "path": str(dest_dir.resolve()),
+                "installed_at": time.time(),
+                "status": "ready",
+            }
+            save_installed_components(installed)
+            return True
+        except Exception:
+            pass
+
+    if pkg_id == "whisper_large_v3":
+        try:
+            from huggingface_hub import snapshot_download
+            snapshot_download(
+                "Systran/faster-whisper-large-v3",
                 local_dir=str(dest_dir.resolve()),
                 local_dir_use_symlinks=False,
             )

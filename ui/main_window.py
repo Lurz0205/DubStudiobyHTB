@@ -357,20 +357,94 @@ class MainWindow(QMainWindow):
             if not getattr(self._export_page, "_jobs", None):
                 self._export_page.refresh_jobs()
 
+    def _get_active_models_status(self):
+        """
+        Check readiness of the specific models currently selected in Settings.
+        Returns: (all_ready: bool, active_info: dict, missing_list: list)
+        """
+        import os
+        from dubstudio.components import is_component_ready
+        from dubstudio.config import AppConfig
+
+        # 1. Determine currently chosen ASR model
+        asr_val = "sensevoice-small"
+        sep_val = "Kim_Vocal_2.onnx"
+        if hasattr(self, "_settings_page") and hasattr(self._settings_page, "_combo_asr_model"):
+            curr_asr = self._settings_page._combo_asr_model.currentData()
+            if curr_asr:
+                asr_val = curr_asr
+            curr_sep = self._settings_page._combo_sep_model.currentData()
+            if curr_sep:
+                sep_val = curr_sep
+        else:
+            try:
+                cfg = AppConfig.load()
+                asr_val = os.getenv("WHISPER_MODEL", "") or os.getenv("ASR_MODEL", "") or cfg.asr.model_size or "sensevoice-small"
+                sep_val = os.getenv("SEPARATION_MODEL", "") or getattr(getattr(cfg, "separation", None), "model_name", "Kim_Vocal_2.onnx")
+            except Exception:
+                pass
+
+        # Map ASR
+        if str(asr_val).lower() in ("sensevoice-small", "sensevoice_small", "sensevoice"):
+            asr_pkg = "sensevoice_small"
+            asr_name = "SenseVoice-Small"
+        else:
+            asr_pkg = "whisper_large_v3"
+            asr_name = "faster-whisper large-v3"
+
+        # Map Separation
+        if "roformer" in str(sep_val).lower():
+            sep_pkg = "bs_roformer"
+            sep_name = "BS-RoFormer EP 317"
+        else:
+            sep_pkg = "kim_vocal_2"
+            sep_name = "Kim Vocal 2"
+
+        asr_ready, _ = is_component_ready(asr_pkg)
+        sep_ready, _ = is_component_ready(sep_pkg)
+        tts_ready, _ = is_component_ready("vieneu_tts_voices")
+
+        missing = []
+        if not asr_ready:
+            missing.append(f"Mô hình nhận diện giọng nói: {asr_name}")
+        if not sep_ready:
+            missing.append(f"Mô hình tách nhạc nền: {sep_name}")
+        if not tts_ready:
+            missing.append("Mô hình giọng đọc thuyết minh: VieNeu-TTS")
+
+        info = {
+            "asr_name": asr_name,
+            "asr_pkg": asr_pkg,
+            "asr_ready": asr_ready,
+            "sep_name": sep_name,
+            "sep_pkg": sep_pkg,
+            "sep_ready": sep_ready,
+            "tts_ready": tts_ready,
+        }
+        return (len(missing) == 0, info, missing)
+
     def _on_check_updates_clicked(self):
-        """Check for both GitHub release updates and modular components updates."""
+        """Check for GitHub release updates, modular components updates, and active model readiness."""
         from PyQt6.QtWidgets import QMessageBox
         from PyQt6.QtCore import QUrl
         from PyQt6.QtGui import QDesktopServices
         from dubstudio.updater import check_all_updates, CURRENT_VERSION
 
-        self.status_bar.showMessage("Đang kiểm tra cập nhật từ GitHub và các gói dữ liệu...")
+        self.status_bar.showMessage("Đang kiểm tra cập nhật từ GitHub và trạng thái mô hình...")
         res = check_all_updates()
         self.status_bar.showMessage("● Sẵn sàng làm việc.")
+
+        # Always refresh settings components view so badges are 100% up-to-date
+        if hasattr(self, "_settings_page") and hasattr(self._settings_page, "_render_components_ui"):
+            try:
+                self._settings_page._render_components_ui()
+            except Exception:
+                pass
 
         has_app = res.get("has_app_update", False)
         comp_updates = res.get("component_updates", [])
 
+        # 1. Check App version update on GitHub
         if has_app:
             latest = res.get("latest_version")
             from dubstudio.packaging import is_packaged, trigger_app_update, get_velopack_updater
@@ -410,16 +484,47 @@ class MainWindow(QMainWindow):
                 QDesktopServices.openUrl(QUrl(dl_url))
             return
 
+        # 2. Check modular component updates
         if comp_updates:
             from ui.dialogs.component_update_dialog import ComponentUpdateDialog
             up_dlg = ComponentUpdateDialog(comp_updates[0], parent=self)
             up_dlg.exec()
             return
 
+        # 3. Check readiness of active models selected in Settings
+        all_ready, info, missing = self._get_active_models_status()
+        if not all_ready:
+            msg = (
+                f"Hệ thống phát hiện mô hình bạn đang chọn để làm việc trong Cài đặt CHƯA ĐƯỢC TẢI:\n\n"
+                + "\n".join(f"  • {m}" for m in missing)
+                + "\n\nBạn có muốn chuyển sang mục 'Cài đặt' để tải ngay bây giờ không?"
+            )
+            reply = QMessageBox.warning(
+                self,
+                "Chưa tải mô hình làm việc",
+                msg,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._btn_settings.setChecked(True)
+                self._on_nav_clicked(4)
+                if hasattr(self, "_settings_page"):
+                    self._settings_page._render_components_ui()
+            return
+
+        # 4. Everything is up to date and all selected models are ready
+        asr_info = f"{info['asr_name']} (Đã sẵn sàng)"
+        sep_info = f"{info['sep_name']} (Đã sẵn sàng)"
+        tts_info = "VieNeu-TTS v3 (Đã sẵn sàng)"
         QMessageBox.information(
             self,
             "Kiểm tra cập nhật",
-            f"Bạn đang sử dụng phiên bản mới nhất (v{CURRENT_VERSION})!\nToàn bộ các gói thành phần AI đều sẵn sàng.",
+            f"Bạn đang sử dụng phiên bản mới nhất (v{CURRENT_VERSION})!\n\n"
+            f"Trạng thái mô hình đang chọn làm việc:\n"
+            f"  • Nhận diện giọng nói: {asr_info}\n"
+            f"  • Tách nhạc nền & thoại: {sep_info}\n"
+            f"  • Giọng thuyết minh: {tts_info}\n\n"
+            f"Toàn bộ tài nguyên đã sẵn sàng hoạt động.",
         )
 
     def _start_startup_update_check(self):
