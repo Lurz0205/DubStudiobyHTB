@@ -229,8 +229,9 @@ def get_tts_worker() -> subprocess.Popen:
                 env=get_subprocess_env(),
                 **get_subprocess_kwargs(),
             )
+            _api_logger.info("Starting warm TTS worker process...")
             ready_data = None
-            for _ in range(30):
+            for _ in range(60):
                 line = _tts_worker_proc.stdout.readline()
                 if not line:
                     break
@@ -245,7 +246,9 @@ def get_tts_worker() -> subprocess.Popen:
             if not ready_data or ready_data.get("status") != "ready":
                 err_msg = ready_data.get("error") if ready_data else "No response from worker"
                 _tts_worker_proc = None
+                _api_logger.error(f"TTS worker failed to initialize: {err_msg}")
                 raise RuntimeError(f"TTS worker init error: {err_msg}")
+            _api_logger.info("Warm TTS worker process is READY.")
         return _tts_worker_proc
 
 
@@ -720,22 +723,37 @@ def delete_job(job_id: str):
     gc.collect()
 
     cfg = AppConfig.load()
-    from dubstudio.paths import resolve_job_workspace
-    ws_dir = resolve_job_workspace(job_id)
-    if ws_dir.exists():
-        import stat
-
-        def _onerror(func, path, exc_info):
-            try:
-                os.chmod(path, stat.S_IWRITE)
-                func(path)
-            except Exception:
-                pass
-
+    from dubstudio.paths import get_user_base_dir, get_app_dir, get_workspace_dir
+    candidate_roots = [
+        cfg.general.workspace_dir,
+        get_workspace_dir(),
+        get_user_base_dir() / "workspace",
+        get_app_dir() / "workspace",
+        Path("dist/DubStudio/workspace"),
+        Path("workspace"),
+    ]
+    import stat
+    def _onerror(func, path, exc_info):
         try:
-            shutil.rmtree(ws_dir, onerror=_onerror)
+            os.chmod(path, stat.S_IWRITE)
+            func(path)
         except Exception:
-            shutil.rmtree(ws_dir, ignore_errors=True)
+            pass
+
+    seen_dirs = set()
+    for root in candidate_roots:
+        try:
+            if not root or not Path(root).exists():
+                continue
+            target = (Path(root) / job_id).resolve()
+            if target.exists() and target not in seen_dirs:
+                seen_dirs.add(target)
+                try:
+                    shutil.rmtree(target, onerror=_onerror)
+                except Exception:
+                    shutil.rmtree(target, ignore_errors=True)
+        except Exception:
+            pass
 
     # Clean all associated output files or folders in out_dir
     out_dir = cfg.general.out_dir

@@ -845,6 +845,15 @@ class StudioPage(QWidget):
         self._workers.append(w)
         w.start()
 
+        # Keep warm TTS worker active in background for instant speech synthesis
+        try:
+            from ui.workers import WarmTTSWorker
+            warm_w = WarmTTSWorker()
+            self._workers.append(warm_w)
+            warm_w.start()
+        except Exception:
+            pass
+
     def _on_job_data_loaded(self, job: dict, segments: List[dict]):
         self._current_segments = segments
 
@@ -1184,8 +1193,9 @@ class StudioPage(QWidget):
                 stop_w.start()
             except Exception:
                 pass
-        elif dub_only:
+        else:
             try:
+                from ui.workers import WarmTTSWorker
                 warm_w = WarmTTSWorker()
                 self._workers.append(warm_w)
                 warm_w.start()

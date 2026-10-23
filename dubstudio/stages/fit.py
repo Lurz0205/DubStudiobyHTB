@@ -432,7 +432,7 @@ def run(job: JobContext, cfg: AppConfig) -> None:
                     res = requests.post(
                         f"http://127.0.0.1:8765/api/jobs/{job.job_id}/segments/{sid}/tts",
                         json={"text": new_tts, "voice": voice_choice, "speed": 1.0},
-                        timeout=25,
+                        timeout=90,
                     )
                     if res.status_code == 200:
                         rdata = res.json()
@@ -441,8 +441,7 @@ def run(job: JobContext, cfg: AppConfig) -> None:
                             synth_ok = True
                             new_dur = d
                 except Exception as e:
-                    api_worker_available = False
-                    emit_event(stage_name, 30.0 + pass_idx * 10, f"Worker TTS (port 8765) tạm thời không khả dụng ({type(e).__name__}). Tự động chuyển sang tiến trình TTS độc lập.", level="info")
+                    emit_event(stage_name, 30.0 + pass_idx * 10, f"Worker TTS (port 8765) câu #{sid} thử lại qua tiến trình con ({type(e).__name__}).", level="info")
 
             # Step B: Fallback to standalone single_tts subprocess
             if not synth_ok:

@@ -252,6 +252,14 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("● Sẵn sàng làm việc.")
         self.setStatusBar(self.status_bar)
 
+        # Pre-warm TTS worker in background so TTS generation and single-sentence preview is instant
+        try:
+            from ui.workers import WarmTTSWorker
+            self._warm_tts_worker = WarmTTSWorker()
+            self._warm_tts_worker.start()
+        except Exception:
+            pass
+
     def _on_cta_create_project(self):
         """Action when clicking '+ Tạo dự án mới' on sidebar."""
         self._on_nav_clicked(0)

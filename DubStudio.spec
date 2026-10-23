@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['start_app.py'],
+    ['C:/Users/sieut/Documents/ToolDichThuat/start_app.py'],
     pathex=[],
     binaries=[],
     datas=[('ui', 'ui'), ('dubstudio', 'dubstudio'), ('config', 'config')],
@@ -32,7 +32,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['dubstudio.ico'],
+    icon=['C:/Users/sieut/Documents/ToolDichThuat/dubstudio.ico'],
 )
 coll = COLLECT(
     exe,
