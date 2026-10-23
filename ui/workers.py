@@ -12,6 +12,21 @@ from PyQt6.QtCore import QThread, pyqtSignal
 import os
 
 
+_SHARED_SESSION: Optional[requests.Session] = None
+
+def get_shared_session() -> requests.Session:
+    """Return shared requests Session with trust_env=False to bypass Windows Registry proxy inspection."""
+    global _SHARED_SESSION
+    if _SHARED_SESSION is None:
+        s = requests.Session()
+        s.trust_env = False
+        adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=1)
+        s.mount("http://", adapter)
+        s.mount("https://", adapter)
+        _SHARED_SESSION = s
+    return _SHARED_SESSION
+
+
 def get_base_url() -> str:
     """Return local API base URL using active dynamic port."""
     port = os.environ.get("DUBSTUDIO_API_PORT", "8765")
@@ -21,18 +36,19 @@ def get_base_url() -> str:
 def _request_with_retry(method: str, path: str, data: Optional[dict] = None, timeout: int = 60) -> Any:
     """Robust HTTP request wrapper with exponential backoff and friendly Windows error handling."""
     url = f"{get_base_url()}{path}"
+    session = get_shared_session()
     max_attempts = 10
     last_err = None
     for attempt in range(max_attempts):
         try:
             if method == "GET":
-                r = requests.get(url, timeout=timeout)
+                r = session.get(url, timeout=timeout)
             elif method == "POST":
-                r = requests.post(url, json=data or {}, timeout=timeout)
+                r = session.post(url, json=data or {}, timeout=timeout)
             elif method == "PUT":
-                r = requests.put(url, json=data or {}, timeout=timeout)
+                r = session.put(url, json=data or {}, timeout=timeout)
             elif method == "DELETE":
-                r = requests.delete(url, timeout=timeout)
+                r = session.delete(url, timeout=timeout)
             else:
                 raise ValueError(f"Unsupported method: {method}")
 
