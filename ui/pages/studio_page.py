@@ -1227,6 +1227,10 @@ class StudioPage(QWidget):
                 self._btn_create_dub.setEnabled(True)
             self._progress_bar.setVisible(False)
             self._lbl_status.setVisible(False)
+
+            # Load job immediately so table & video are populated BEFORE modal popup appears
+            self._load_current_job()
+
             if subtitles_only:
                 QMessageBox.information(
                     self, "Hoàn tất tạo phụ đề",
@@ -1234,7 +1238,6 @@ class StudioPage(QWidget):
                 )
             else:
                 QMessageBox.information(self, "Hoàn tất lồng tiếng", "Quy trình lồng tiếng đã hoàn tất thành công! Bạn có thể xem thử video ở khung bên trái.")
-            self._load_current_job()
 
         def _on_error(err: str):
             self._btn_run.setEnabled(True)

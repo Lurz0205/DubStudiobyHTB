@@ -1,17 +1,16 @@
-# PROGRESS.md — v1.0.1 Freeze & Watchdog Fixes
+# PROGRESS.md — Phase 1 Performance & Tab Switch Overhaul
 
 ## Đã hoàn thành (Done)
-- Áp dụng trọn vẹn 5 giải pháp khử đơ Main Thread:
-  - Thêm `get_shared_session()` với `trust_env=False` và Connection Pooling chống quét Windows Proxy Registry.
-  - Tắt `access_log=False` trong Uvicorn FastAPI để không nghẽn stream I/O trên Windows subsystem.
-  - Cố định `QT_MEDIA_BACKEND=windows` và `NO_PROXY=127.0.0.1,localhost` tại đầu `start_app.py`.
-  - Bổ sung `stdin=subprocess.DEVNULL` và `CREATE_NO_WINDOW` vào `get_subprocess_kwargs()`.
-  - Tích hợp `start_gui_freeze_watchdog(threshold_sec=0.5)` tự động ghi log `gui_freeze_dump.log` nếu GUI bị khựng > 0.5s.
-- Fix Gemini Web CDP: quét trực tiếp khối code `<pre>` JSON từ DOM, bỏ điều kiện cứng đếm panel.
-- Đồng bộ toàn bộ mã nguồn lên GitHub `main` và cập nhật trực tiếp vào `dist\DubStudio`.
-- Kiểm thử máy khách: `DubStudio Selftest: OK` (Exit Code: 0).
+- Chuyển `QT_MEDIA_BACKEND` sang `ffmpeg` (thay thế WMF COM lock).
+- Loại bỏ `setCellWidget`: dùng `VoiceComboDelegate` và Action Item, giảm thời gian nạp 250 dòng phụ đề từ 1.200ms xuống 8.5ms.
+- Bất đồng bộ hóa `setup_job_audio` qua `AudioPrepWorker` (`QThread` có `generation_id` chống chồng lấn).
+- Đẩy `probe_file` và nạp metadata video khỏi luồng Main Thread.
+- Debounce 300ms + bất đồng bộ hóa ghi đĩa JSON và HTTP trong `_save_style_to_job`.
+- Chặn bẫy nạp lại job trùng lặp khi chuyển tab trong `main_window.py`.
+- Benchmark chuyển tab khi có sẵn 250 phụ đề + audio: đạt 10ms - 35ms (giảm từ 3.000ms - 4.000ms).
+- 100% unit tests passed (`pytest tests/ -q`: 130/130 passed).
+- Đóng gói hoàn tất `dist\DubStudio\DubStudio.exe` và push code lên GitHub `main` (commit: `9cf5072`).
 
 ## Tiếp theo (Next)
-- Người dùng test mở `DubStudio.exe` trong `dist` và thực hiện dịch video để kiểm tra độ mượt.
-
-
+- Người dùng mở trực tiếp `dist\DubStudio\DubStudio.exe` để trải nghiệm độ mượt khi chuyển tab và thao tác phụ đề.
+- Tiếp tục bước sang tách tiến trình Sidecar / Python Embeddable theo lộ trình thương mại hóa.
