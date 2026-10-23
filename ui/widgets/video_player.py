@@ -893,6 +893,7 @@ class VideoPlayerWidget(QWidget):
         if fast_voc:
             self._orig_voice_path = str(fast_voc.resolve())
             self._orig_voice_player.setSource(QUrl.fromLocalFile(self._orig_voice_path))
+        self._apply_stem_volumes()
 
         # Launch background prep worker with generation ID to assemble/boost tracks asynchronously
         self._current_gen_id += 1
@@ -928,6 +929,7 @@ class VideoPlayerWidget(QWidget):
 
         if "vi_voice" in res:
             target_vi = res["vi_voice"]
+            self._vi_voice_raw_path = res.get("vi_raw", target_vi)
             if getattr(self, "_vi_voice_path", None) != target_vi:
                 self._vi_voice_path = target_vi
                 self._vi_voice_player.setSource(QUrl.fromLocalFile(target_vi))
@@ -952,6 +954,8 @@ class VideoPlayerWidget(QWidget):
                 self._orig_voice_player.setPosition(pos)
                 if is_playing:
                     self._orig_voice_player.play()
+
+        self._apply_stem_volumes()
 
     def load_audio_tracks(
         self,

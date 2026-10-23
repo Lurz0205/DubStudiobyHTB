@@ -409,8 +409,11 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
     preview_mp4 = job.workspace / "preview_dubbed.mp4"
     if input_mp4.exists() and final_mixed_wav.exists():
         try:
+            from dubstudio.paths import resolve_tool
+            from dubstudio.packaging import get_subprocess_env, get_subprocess_kwargs
+            ffmpeg_exe = resolve_tool("ffmpeg")
             prev_cmd = [
-                "ffmpeg", "-y",
+                ffmpeg_exe, "-y",
                 "-i", str(input_mp4.resolve()),
                 "-i", str(final_mixed_wav.resolve()),
                 "-map", "0:v:0",
@@ -420,7 +423,13 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
                 "-b:a", "192k",
                 str(preview_mp4.resolve()),
             ]
-            subprocess.run(prev_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(
+                prev_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=get_subprocess_env(),
+                **get_subprocess_kwargs(),
+            )
         except Exception:
             pass
 

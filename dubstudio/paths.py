@@ -81,23 +81,33 @@ def get_logs_dir() -> Path:
 
 
 def get_workspace_dir() -> Path:
-    """Return job workspace directory (isolated in AppData for packaged, repo root for dev)."""
+    """Return job workspace directory (strictly isolated between dev and packaged)."""
+    if os.environ.get("DUBSTUDIO_WORKSPACE_DIR"):
+        d = Path(os.environ["DUBSTUDIO_WORKSPACE_DIR"])
+        _mkdir_retry(d)
+        return d.resolve()
+
     if is_packaged():
         d = get_user_base_dir() / "workspace"
     else:
         d = get_app_dir() / "workspace"
     _mkdir_retry(d)
-    return d
+    return d.resolve()
 
 
 def get_out_dir() -> Path:
     """Return exported media directory."""
+    if os.environ.get("DUBSTUDIO_OUT_DIR"):
+        d = Path(os.environ["DUBSTUDIO_OUT_DIR"])
+        _mkdir_retry(d)
+        return d.resolve()
+
     if is_packaged():
         d = get_user_base_dir() / "out"
     else:
         d = get_app_dir() / "out"
     _mkdir_retry(d)
-    return d
+    return d.resolve()
 
 
 def get_bin_dir() -> Path:
@@ -162,13 +172,22 @@ def resolve_tool(name: str, custom_path: Optional[str] = None) -> str:
 
 def resolve_job_workspace(job_id: str) -> Path:
     """
-    Resolve the directory containing a job, checking common candidate locations.
-    Prioritizes directory containing the freshest segments.json, or active job artifacts.
+    Resolve the directory containing a job.
+    Strictly prioritizes the current active workspace directory (get_workspace_dir()).
+    Falls back to alternate locations only if the active workspace has no files.
     """
     if not job_id:
         return get_workspace_dir()
 
+    # 0. Active workspace has top priority
+    active_ws = get_workspace_dir() / job_id
+    if active_ws.exists():
+        for k in ("segments.json", "state.json", "input.mp4", "units.json", "meta.json"):
+            if (active_ws / k).exists():
+                return active_ws.resolve()
+
     candidates = [
+        get_workspace_dir() / job_id,
         get_user_base_dir() / "workspace" / job_id,
         get_app_dir() / "workspace" / job_id,
         Path.cwd() / "workspace" / job_id,

@@ -114,8 +114,8 @@ def _quick_rebuild_voice_track(job_id: str) -> None:
     try:
         import numpy as np
         import soundfile as sf
-        cfg = AppConfig.load()
-        ws_dir = cfg.general.workspace_dir / job_id
+        from dubstudio.paths import resolve_job_workspace
+        ws_dir = resolve_job_workspace(job_id)
         seg_file = ws_dir / "segments.json"
         if not seg_file.exists():
             return
@@ -201,6 +201,11 @@ def _quick_rebuild_voice_track(job_id: str) -> None:
             voice_track = voice_track * (0.95 / peak)
         out_file = ws_dir / "voice_track.wav"
         sf.write(str(out_file.resolve()), voice_track, sr, subtype="PCM_16")
+        out_raw = ws_dir / "voice_raw.wav"
+        try:
+            sf.write(str(out_raw.resolve()), voice_track, sr, subtype="PCM_16")
+        except Exception:
+            pass
     except Exception:
         pass
 
@@ -502,13 +507,13 @@ def _run_pipeline_worker(job_id: str, video_path: Path, subtitles_only: bool = F
                 emit_event("pipeline", 100.0, "Hoàn tất tạo và dịch phụ đề! Bạn có thể kiểm tra trước khi lồng tiếng.")
             else:
                 # Generate preview_dubbed.mp4 by stream-copying video and attaching voice_track.wav (no subtitles burned)
-                cfg = AppConfig.load()
-                ws_dir = cfg.general.workspace_dir / job_id
+                from dubstudio.paths import resolve_job_workspace, resolve_tool
+                from dubstudio.packaging import get_subprocess_env, get_subprocess_kwargs
+                ws_dir = resolve_job_workspace(job_id)
                 voice_track = ws_dir / "voice_track.wav"
                 in_vid = ws_dir / "input.mp4"
                 prev_vid = ws_dir / "preview_dubbed.mp4"
                 if in_vid.exists() and voice_track.exists():
-                    from dubstudio.paths import resolve_tool
                     ffmpeg_exe = str(resolve_tool("ffmpeg"))
                     remux_cmd = [
                         ffmpeg_exe, "-y",
@@ -521,7 +526,13 @@ def _run_pipeline_worker(job_id: str, video_path: Path, subtitles_only: bool = F
                         "-b:a", "192k",
                         str(prev_vid.resolve()),
                     ]
-                    subprocess.run(remux_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.run(
+                        remux_cmd,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        env=get_subprocess_env(),
+                        **get_subprocess_kwargs(),
+                    )
                 emit_event("pipeline", 100.0, "Hoàn tất tạo giọng lồng tiếng (chưa khắc phụ đề)!")
         else:
             err_detail = "Tiến trình lồng tiếng bị gián đoạn hoặc gặp lỗi"
@@ -567,12 +578,9 @@ def _run_pipeline_worker(job_id: str, video_path: Path, subtitles_only: bool = F
 def list_jobs():
     """List all workspace jobs with their stage statuses and metadata."""
     cfg = AppConfig.load()
-    from dubstudio.paths import get_user_base_dir, get_app_dir, resolve_job_workspace
+    from dubstudio.paths import resolve_job_workspace
 
     candidate_roots = [cfg.general.workspace_dir]
-    for extra in [get_user_base_dir() / "workspace", get_app_dir() / "workspace", Path("dist/DubStudio/workspace")]:
-        if extra.exists() and extra not in candidate_roots:
-            candidate_roots.append(extra)
 
     jobs = []
     seen_ids = set()
@@ -689,7 +697,7 @@ def create_job(req: CreateJobRequest):
     except Exception as e:
         if tmp_dir.exists():
             shutil.rmtree(tmp_dir, ignore_errors=True)
-        logger.error(f"Failed to create job {job_id}: {e}", exc_info=True)
+        _api_logger.error(f"Failed to create job {job_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Không thể khởi tạo dự án: {e}")
 
     return {
@@ -712,7 +720,8 @@ def delete_job(job_id: str):
     gc.collect()
 
     cfg = AppConfig.load()
-    ws_dir = cfg.general.workspace_dir / job_id
+    from dubstudio.paths import resolve_job_workspace
+    ws_dir = resolve_job_workspace(job_id)
     if ws_dir.exists():
         import stat
 
@@ -1346,8 +1355,8 @@ def regenerate_segment_tts(job_id: str, seg_id: int, req: Optional[RegenTTSReque
     import hashlib
     from dubstudio.text.vi_normalize import normalize_for_tts
 
-    cfg = AppConfig.load()
-    ws_dir = cfg.general.workspace_dir / job_id
+    from dubstudio.paths import resolve_job_workspace
+    ws_dir = resolve_job_workspace(job_id)
     seg_file = ws_dir / "segments.json"
     if not seg_file.exists():
         raise HTTPException(status_code=404, detail="Chưa có dữ liệu segments")
@@ -1473,8 +1482,15 @@ def regenerate_segment_tts(job_id: str, seg_id: int, req: Optional[RegenTTSReque
 
 @app.get("/api/jobs/{job_id}/preview-video")
 def get_preview_video(job_id: str):
-    """Serve the best available video file for preview (rendered > input.mp4 > source in samples)."""
+    """Serve the best available video file for preview (preview_dubbed > rendered > input.mp4 > source in meta)."""
     cfg = AppConfig.load()
+    from dubstudio.paths import resolve_job_workspace
+    ws_dir = resolve_job_workspace(job_id)
+
+    # 0. Fast local preview with dubbed audio remuxed (if present)
+    prev_dubbed = ws_dir / "preview_dubbed.mp4"
+    if prev_dubbed.exists() and prev_dubbed.stat().st_size > 1024:
+        return FileResponse(prev_dubbed, media_type="video/mp4")
 
     # 1. Output rendered video (ONLY for this exact job ID)
     out_rendered = cfg.general.out_dir / f"{job_id}_vi.mp4"
@@ -1482,12 +1498,12 @@ def get_preview_video(job_id: str):
         return FileResponse(out_rendered, media_type="video/mp4")
 
     # 2. Workspace input.mp4 (the source video of this job)
-    ws_input = cfg.general.workspace_dir / job_id / "input.mp4"
+    ws_input = ws_dir / "input.mp4"
     if ws_input.exists():
         return FileResponse(ws_input, media_type="video/mp4")
 
     # 3. Check meta.json for original source video path
-    meta_file = cfg.general.workspace_dir / job_id / "meta.json"
+    meta_file = ws_dir / "meta.json"
     if meta_file.exists():
         try:
             m = json.loads(meta_file.read_text(encoding="utf-8"))
@@ -1503,8 +1519,8 @@ def get_preview_video(job_id: str):
 @app.get("/api/jobs/{job_id}/style")
 def get_subtitle_style(job_id: str):
     """Get saved subtitle style for job."""
-    cfg = AppConfig.load()
-    ws_dir = cfg.general.workspace_dir / job_id
+    from dubstudio.paths import resolve_job_workspace
+    ws_dir = resolve_job_workspace(job_id)
     style_file = ws_dir / "style.json"
     style_data = {
         "font_name": "Arial",
@@ -1563,8 +1579,8 @@ def get_subtitle_style(job_id: str):
 @app.post("/api/jobs/{job_id}/style")
 def save_subtitle_style(job_id: str, req: SubtitleStyleRequest):
     """Save custom subtitle style and mix audio settings for job."""
-    cfg = AppConfig.load()
-    ws_dir = cfg.general.workspace_dir / job_id
+    from dubstudio.paths import resolve_job_workspace
+    ws_dir = resolve_job_workspace(job_id)
     ws_dir.mkdir(parents=True, exist_ok=True)
     style_file = ws_dir / "style.json"
     dumped = req.model_dump()
@@ -1602,8 +1618,8 @@ def save_subtitle_style(job_id: str, req: SubtitleStyleRequest):
 @app.post("/api/jobs/{job_id}/render")
 def render_job_video(job_id: str):
     """Render final dubbed video with styled hard subtitles."""
-    cfg = AppConfig.load()
-    ws_dir = cfg.general.workspace_dir / job_id
+    from dubstudio.paths import resolve_job_workspace
+    ws_dir = resolve_job_workspace(job_id)
     if not ws_dir.exists():
         raise HTTPException(status_code=404, detail="Không tìm thấy tác vụ")
 
@@ -1679,8 +1695,8 @@ def render_job_video(job_id: str):
 @app.post("/api/jobs/{job_id}/config")
 def save_job_config(job_id: str, req: JobConfigRequest):
     """Save translation style / tone and voice assignments for job."""
-    cfg = AppConfig.load()
-    ws_dir = cfg.general.workspace_dir / job_id
+    from dubstudio.paths import resolve_job_workspace
+    ws_dir = resolve_job_workspace(job_id)
     ws_dir.mkdir(parents=True, exist_ok=True)
     conf_file = ws_dir / "job_config.json"
     existing_data = {}
@@ -1975,8 +1991,8 @@ def clear_logs_endpoint():
 @app.post("/api/jobs/{job_id}/manual-translate")
 def submit_manual_translation(job_id: str, req: dict):
     """Receive user manual translation text or cancellation for job."""
-    cfg = AppConfig.load()
-    ws_dir = cfg.general.workspace_dir / job_id
+    from dubstudio.paths import resolve_job_workspace
+    ws_dir = resolve_job_workspace(job_id)
     if not ws_dir.exists():
         raise HTTPException(status_code=404, detail="Không tìm thấy thư mục tác vụ")
     resp_file = ws_dir / "manual_translate_response.json"

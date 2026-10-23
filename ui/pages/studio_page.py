@@ -1337,8 +1337,52 @@ class StudioPage(QWidget):
     def _on_play_segment_audio(self, seg_idx: int):
         if not self._current_job_id:
             return
-        wav_file = Path("workspace") / self._current_job_id / "tts" / f"{seg_idx:04d}.wav"
+        from dubstudio.paths import resolve_job_workspace
+        ws_dir = resolve_job_workspace(self._current_job_id)
+
+        # Check candidate locations
+        wav_file = ws_dir / "tts" / f"{seg_idx:04d}.wav"
         if not wav_file.exists():
+            wav_file = ws_dir / "tts_stretched" / f"{seg_idx:04d}.wav"
+
+        # Check segment custom tts_file attribute
+        if not wav_file.exists():
+            for s in self._current_segments:
+                if (s.get("id") == seg_idx or s.get("index") == seg_idx) and s.get("tts_file"):
+                    cand = ws_dir / str(s.get("tts_file"))
+                    if cand.exists():
+                        wav_file = cand
+                        break
+
+        # If audio not yet synthesized, automatically trigger on-demand TTS synthesis
+        if not wav_file.exists():
+            target_seg = None
+            for s in self._current_segments:
+                if s.get("id") == seg_idx or s.get("index") == seg_idx:
+                    target_seg = s
+                    break
+
+            vi_text = (target_seg.get("vi_text") or "").strip() if target_seg else ""
+            if target_seg and vi_text:
+                voice = target_seg.get("voice") or "vi-VN-NamMinhNeural"
+                fit_info = target_seg.get("fit") if isinstance(target_seg.get("fit"), dict) else {}
+                speed = float(target_seg.get("speed") or fit_info.get("rate") or 1.0)
+                self._sub_editor.set_row_busy(seg_idx, True)
+                w = RegenTTSWorker(self._current_job_id, seg_idx, voice, speed, text=vi_text)
+
+                def _on_auto_synth_done(idx, res):
+                    self._sub_editor.set_row_busy(idx, False)
+                    for s in self._current_segments:
+                        if s.get("id") == idx or s.get("index") == idx:
+                            s["tts_file"] = f"tts/{idx:04d}.wav"
+                            break
+                    self._on_play_segment_audio(idx)
+
+                w.finished.connect(_on_auto_synth_done)
+                self._workers.append(w)
+                w.start()
+                return
+
             QMessageBox.information(
                 self, "Chưa có âm thanh", f"Chưa có tệp âm thanh cho câu #{seg_idx}.\nVui lòng bấm '2. Tạo lồng tiếng' ở thanh công cụ để tổng hợp giọng đọc!"
             )
@@ -1351,8 +1395,10 @@ class StudioPage(QWidget):
             self._seg_player = QMediaPlayer(self)
             self._seg_audio_out = QAudioOutput(self)
             self._seg_player.setAudioOutput(self._seg_audio_out)
-            self._seg_audio_out.setVolume(1.0)
 
+        self._seg_player.stop()
+        self._seg_audio_out.setMuted(False)
+        self._seg_audio_out.setVolume(1.0)
         self._seg_player.setSource(QUrl.fromLocalFile(str(wav_file.resolve())))
         self._seg_player.play()
 

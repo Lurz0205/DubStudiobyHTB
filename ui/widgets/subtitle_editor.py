@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import Callable, List, Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal, QEvent
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent, QSize
 from PyQt6.QtGui import QColor, QContextMenuEvent
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -169,6 +169,7 @@ class SubtitleEditorWidget(QTableWidget):
         self.setWordWrap(True)
         self.verticalHeader().setDefaultSectionSize(48)
         self.setShowGrid(False)
+        self.setIconSize(QSize(18, 18))
         self.setMouseTracking(False)
         self.viewport().setMouseTracking(False)
         self.setItemDelegateForColumn(self.COL_VOICE, VoiceComboDelegate(self))
@@ -373,10 +374,10 @@ class SubtitleEditorWidget(QTableWidget):
         item_action.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         item_action.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
         if mute_tts:
-            item_action.setIcon(get_icon("volume-x", "#ef4444", "#ef4444", 14))
+            item_action.setIcon(get_icon("volume-x", "#ef4444", "#ef4444", 16))
             item_action.setToolTip("Giọng đọc TTS đang TẮT. Nhấp chuột vào để nghe thử hoặc bấm chuột phải để bật lại.")
         else:
-            item_action.setIcon(get_icon("volume-2", "#10b981", "#10b981", 14))
+            item_action.setIcon(get_icon("volume-2", "#10b981", "#10b981", 16))
             item_action.setToolTip("Nghe thử âm thanh câu này")
         self.setItem(row, self.COL_ACTION, item_action)
 

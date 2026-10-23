@@ -1182,8 +1182,19 @@ class SubtitleExportPage(QWidget):
                     sid = s.get("id")
                     if sid is None:
                         continue
+                    if s.get("mute_tts") or s.get("keep_original"):
+                        continue
+                    # Check candidate locations
                     w_file = ws_dir / f"tts/{sid:04d}.wav"
-                    if not w_file.exists() or w_file.stat().st_size < 500:
+                    w_stretched = ws_dir / f"tts_stretched/{sid:04d}.wav"
+                    w_custom = ws_dir / str(s.get("tts_file", "")) if s.get("tts_file") else None
+
+                    has_audio = (
+                        (w_file.exists() and w_file.stat().st_size > 500) or
+                        (w_stretched.exists() and w_stretched.stat().st_size > 500) or
+                        (w_custom and w_custom.exists() and w_custom.stat().st_size > 500)
+                    )
+                    if not has_audio:
                         missing_tts_ids.append(str(sid))
                 if missing_tts_ids:
                     msg = (
