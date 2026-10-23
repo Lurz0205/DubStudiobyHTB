@@ -148,6 +148,8 @@ def split_multi_sentence_segments(segments: List[Dict[str, Any]]) -> List[Dict[s
                 new_seg["tts_dur"] = None
                 new_seg["tts_hash"] = None
                 new_seg["fit"] = None
+                new_seg["cues"] = None
+                new_seg["sub_slices"] = None
                 result.append(new_seg)
                 running_st = sent_en
         else:

@@ -533,20 +533,17 @@ def run(job: JobContext, cfg: AppConfig) -> None:
         max_audio_dur = max(0.1, round(available_dur - 0.05, 3))
         silence_after = max(0.0, available_dur - orig_dur)
 
-        # Calculate rate: prefer 1.0x - 1.10x, but if collision is imminent, adaptively allow up to 1.25x
+        # Calculate rate: strictly adhere to [1.0x - 1.10x] speedup; NEVER artificially slow down natural speech
         if tts_dur > max_audio_dur:
             raw_rate = tts_dur / max_audio_dur
-            rate = min(1.25, max(1.0, round(raw_rate, 2)))
-            method = "speedup"
-        elif tts_dur / orig_dur < 0.90:
-            rate = 0.90
-            method = "slowdown"
+            rate = min(1.10, max(1.0, round(raw_rate, 2)))
+            method = "speedup" if rate > 1.01 else "none"
         else:
             rate = 1.0
             method = "none"
 
         final_wav = f"tts/{seg['id']:04d}.wav"
-        if method in ("speedup", "slowdown") and rate != 1.0:
+        if method == "speedup" and rate > 1.01:
             stretched_file = stretched_dir / f"{seg['id']:04d}.wav"
             time_stretch_audio(wav_path, stretched_file, rate)
             final_wav = f"tts_stretched/{stretched_file.name}"
@@ -567,8 +564,7 @@ def run(job: JobContext, cfg: AppConfig) -> None:
             "notes": f"Tốc độ: {rate:.2f}x ({method})",
         }
         seg["fit_rate"] = round(rate, 2)
-        if seg.get("speed") is None:
-            seg["speed"] = 1.0
+        seg["speed"] = round(rate, 2)
 
         voice_start = round(st, 3)
         voice_end = round(voice_start + effective_dur, 3)

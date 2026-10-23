@@ -634,12 +634,8 @@ def run(job: JobContext, cfg: AppConfig) -> None:
             if segments_file.exists():
                 with open(segments_file, "r", encoding="utf-8") as sf:
                     seg_data = json.load(sf)
-                unit_map = {u["id"]: u for u in current_items}
-                for seg in seg_data.get("segments", []):
-                    if seg["id"] in unit_map:
-                        u = unit_map[seg["id"]]
-                        seg["vi_text"] = u.get("vi_text", "")
-                        seg["tts_text"] = u.get("tts_text", "")
+                seg_data["segments"] = current_items
+                seg_data["translation_style"] = style
                 with open(segments_file, "w", encoding="utf-8") as sf:
                     json.dump(seg_data, sf, ensure_ascii=False, indent=2)
         else:
