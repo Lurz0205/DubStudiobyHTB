@@ -339,9 +339,11 @@ class MainWindow(QMainWindow):
         self._update_nav_ui(page_id)
 
         if page_id == 0 and hasattr(self, "_projects_page"):
-            self._projects_page.refresh_projects()
+            if not getattr(self._projects_page, "_jobs", None):
+                self._projects_page.refresh_projects()
         elif page_id == 2 and hasattr(self, "_export_page"):
-            self._export_page.refresh_jobs()
+            if not getattr(self._export_page, "_jobs", None):
+                self._export_page.refresh_jobs()
 
     def _on_check_updates_clicked(self):
         """Check for both GitHub release updates and modular components updates."""

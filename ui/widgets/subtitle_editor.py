@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -60,6 +61,45 @@ class NoScrollComboBox(QComboBox):
 
     def mouseMoveEvent(self, e):
         e.accept()
+
+
+class VoiceComboDelegate(QStyledItemDelegate):
+    """Zero-freeze item delegate for per-row voice dropdown selection."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def createEditor(self, parent, option, index):
+        combo = NoScrollComboBox(parent)
+        combo.addItems(MALE_VOICES)
+        combo.insertSeparator(len(MALE_VOICES))
+        combo.addItems(FEMALE_VOICES)
+        return combo
+
+    def setEditorData(self, editor, index):
+        current_text = index.data(Qt.ItemDataRole.DisplayRole)
+        all_items = MALE_VOICES + FEMALE_VOICES
+        if current_text in all_items:
+            pos = all_items.index(current_text) if current_text in all_items else 0
+            combo_idx = pos if pos < len(MALE_VOICES) else pos + 1
+            editor.setCurrentIndex(combo_idx)
+
+    def setModelData(self, editor, model, index):
+        new_voice = editor.currentText()
+        if new_voice:
+            model.setData(index, new_voice, Qt.ItemDataRole.DisplayRole)
+            table = self.parent()
+            if table and hasattr(table, "segment_voice_changed"):
+                row = index.row()
+                item_idx = table.item(row, table.COL_IDX)
+                if item_idx:
+                    seg_idx = item_idx.data(Qt.ItemDataRole.UserRole)
+                    if seg_idx is not None:
+                        table.segment_voice_changed.emit(int(seg_idx), new_voice)
+                        if hasattr(table, "_segments"):
+                            for s in table._segments:
+                                if s.get("id") == seg_idx:
+                                    s["voice"] = new_voice
+                                    break
 
 
 class SubtitleEditorWidget(QTableWidget):
@@ -131,6 +171,7 @@ class SubtitleEditorWidget(QTableWidget):
         self.setShowGrid(False)
         self.setMouseTracking(False)
         self.viewport().setMouseTracking(False)
+        self.setItemDelegateForColumn(self.COL_VOICE, VoiceComboDelegate(self))
 
         self.itemSelectionChanged.connect(self._on_selection_changed)
         self.cellClicked.connect(self._on_cell_clicked)
@@ -190,6 +231,7 @@ class SubtitleEditorWidget(QTableWidget):
 
     def load_segments(self, segments: List[dict]):
         self._segments = segments
+        self.setUpdatesEnabled(False)
         self.blockSignals(True)
         try:
             self.setRowCount(0)
@@ -197,6 +239,7 @@ class SubtitleEditorWidget(QTableWidget):
                 self._add_row(seg)
         finally:
             self.blockSignals(False)
+            self.setUpdatesEnabled(True)
 
     def set_segments(self, segments: List[dict]):
         """Alias for load_segments."""
@@ -216,6 +259,65 @@ class SubtitleEditorWidget(QTableWidget):
                 if item_time:
                     item_time.setText(time_str)
                 break
+
+    def cellWidget(self, row: int, col: int):
+        w = super().cellWidget(row, col)
+        if w is not None:
+            return w
+        if col == self.COL_VOICE:
+            item_voice = self.item(row, self.COL_VOICE)
+            voice = item_voice.text() if item_voice else self._default_voice
+            combo = self._create_voice_combo(row, voice)
+            super().setCellWidget(row, col, combo)
+            return combo
+        elif col == self.COL_ACTION:
+            w_act = self._create_action_widget(row)
+            super().setCellWidget(row, col, w_act)
+            return w_act
+        return None
+
+    def _create_voice_combo(self, row: int, voice: str) -> NoScrollComboBox:
+        item_idx = self.item(row, self.COL_IDX)
+        idx = item_idx.data(Qt.ItemDataRole.UserRole) if item_idx else row
+        combo = NoScrollComboBox(self)
+        combo.addItems(MALE_VOICES)
+        combo.insertSeparator(len(MALE_VOICES))
+        combo.addItems(FEMALE_VOICES)
+        if voice in ALL_VOICES:
+            all_items = MALE_VOICES + FEMALE_VOICES
+            pos = all_items.index(voice) if voice in all_items else 0
+            combo_idx = pos if pos < len(MALE_VOICES) else pos + 1
+            combo.setCurrentIndex(combo_idx)
+        combo.setProperty("seg_idx", idx)
+        combo.currentTextChanged.connect(lambda v, i=idx, r=row: self._on_voice_changed(r, i, v))
+        return combo
+
+    def _on_voice_changed(self, row: int, seg_idx: int, new_voice: str):
+        it = self.item(row, self.COL_VOICE)
+        if it:
+            it.setText(new_voice)
+        for s in self._segments:
+            if s.get("id") == seg_idx:
+                s["voice"] = new_voice
+                break
+        self.segment_voice_changed.emit(int(seg_idx), new_voice)
+
+    def _create_action_widget(self, row: int) -> QWidget:
+        item_idx = self.item(row, self.COL_IDX)
+        idx = item_idx.data(Qt.ItemDataRole.UserRole) if item_idx else row
+        action_widget = QWidget(self)
+        action_layout = QHBoxLayout(action_widget)
+        action_layout.setContentsMargins(0, 2, 0, 2)
+        action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        btn_play = QPushButton()
+        item_act = self.item(row, self.COL_ACTION)
+        icon = item_act.icon() if item_act else get_icon("volume-2", "#10b981", "#10b981", 14)
+        btn_play.setIcon(icon)
+        btn_play.setFixedSize(30, 26)
+        btn_play.setProperty("seg_idx", idx)
+        btn_play.clicked.connect(lambda _, i=idx: self.play_audio_requested.emit(int(i)))
+        action_layout.addWidget(btn_play)
+        return action_widget
 
     def _add_row(self, seg: dict):
         row = self.rowCount()
@@ -261,46 +363,28 @@ class SubtitleEditorWidget(QTableWidget):
             item_vi.setToolTip("Phụ đề hiển thị trên video (Giọng đọc TTS đang tắt cho câu này)")
         self.setItem(row, self.COL_VI, item_vi)
 
-        # Voice combobox
-        combo = NoScrollComboBox()
-        combo.addItems(MALE_VOICES)
-        combo.insertSeparator(len(MALE_VOICES))
-        combo.addItems(FEMALE_VOICES)
-        if voice in ALL_VOICES:
-            all_items = MALE_VOICES + FEMALE_VOICES
-            pos = all_items.index(voice) if voice in all_items else 0
-            combo_idx = pos if pos < len(MALE_VOICES) else pos + 1
-            combo.setCurrentIndex(combo_idx)
-        combo.setProperty("seg_idx", idx)
-        combo.currentTextChanged.connect(lambda v, i=idx: self.segment_voice_changed.emit(i, v))
-        self.setCellWidget(row, self.COL_VOICE, combo)
+        # Voice (Zero-widget delegate-managed item)
+        item_voice = QTableWidgetItem(voice)
+        item_voice.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setItem(row, self.COL_VOICE, item_voice)
 
-        # Action button (Play audio)
-        action_widget = QWidget()
-        action_layout = QHBoxLayout(action_widget)
-        action_layout.setContentsMargins(0, 2, 0, 2)
-        action_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        btn_play = QPushButton()
+        # Action (Zero-widget icon item)
+        item_action = QTableWidgetItem()
+        item_action.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        item_action.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
         if mute_tts:
-            btn_play.setIcon(get_icon("volume-x", "#ef4444", "#ef4444", 14))
-            btn_play.setToolTip("Giọng đọc TTS đang TẮT. Nhấp chuột phải để bật lại.")
+            item_action.setIcon(get_icon("volume-x", "#ef4444", "#ef4444", 14))
+            item_action.setToolTip("Giọng đọc TTS đang TẮT. Nhấp chuột vào để nghe thử hoặc bấm chuột phải để bật lại.")
         else:
-            btn_play.setIcon(get_icon("volume-2", "#10b981", "#10b981", 14))
-            btn_play.setToolTip("Nghe thử âm thanh câu này")
-        btn_play.setFixedSize(30, 26)
-        btn_play.setProperty("seg_idx", idx)
-        btn_play.clicked.connect(lambda _, i=idx: self.play_audio_requested.emit(i))
-        action_layout.addWidget(btn_play)
-
-        self.setCellWidget(row, self.COL_ACTION, action_widget)
-        item_idx.setData(Qt.ItemDataRole.UserRole, idx)
+            item_action.setIcon(get_icon("volume-2", "#10b981", "#10b981", 14))
+            item_action.setToolTip("Nghe thử âm thanh câu này")
+        self.setItem(row, self.COL_ACTION, item_action)
 
     def _on_regen(self, row: int, seg_idx: int):
-        combo = self.cellWidget(row, self.COL_VOICE)
+        it_v = self.item(row, self.COL_VOICE)
+        voice = it_v.text().strip() if it_v else self._default_voice
         item_vi = self.item(row, self.COL_VI)
         vi_text = item_vi.text().strip() if item_vi else ""
-        voice = combo.currentText() if combo else self._default_voice
         speed = 1.0
         for s in self._segments:
             if s.get("id") == seg_idx:
@@ -327,25 +411,28 @@ class SubtitleEditorWidget(QTableWidget):
             idx = item.data(Qt.ItemDataRole.UserRole)
             if idx is not None:
                 self.segment_selected.emit(int(idx))
+                if col == self.COL_ACTION:
+                    self.play_audio_requested.emit(int(idx))
 
     def set_row_busy(self, seg_idx: int, busy: bool):
         """Show/hide spinner on play button for a segment."""
         for row in range(self.rowCount()):
             item = self.item(row, self.COL_IDX)
             if item and item.data(Qt.ItemDataRole.UserRole) == seg_idx:
-                w = self.cellWidget(row, self.COL_ACTION)
+                item_act = self.item(row, self.COL_ACTION)
+                if item_act:
+                    if busy:
+                        item_act.setIcon(get_icon("spinner", "#ffffff", "#ffffff", 13))
+                        self._busy_rows.add(row)
+                    else:
+                        item_act.setIcon(get_icon("volume-2", "#10b981", "#10b981", 14))
+                        self._busy_rows.discard(row)
+                w = super().cellWidget(row, self.COL_ACTION)
                 if w:
                     btns = w.findChildren(QPushButton)
                     if btns:
-                        btn = btns[0]
-                        if busy:
-                            btn.setIcon(get_icon("spinner", "#ffffff", "#ffffff", 13))
-                            btn.setEnabled(False)
-                            self._busy_rows.add(row)
-                        else:
-                            btn.setIcon(get_icon("play", "#9ca3af", "#f0f2f5", 13))
-                            btn.setEnabled(True)
-                            self._busy_rows.discard(row)
+                        btns[0].setIcon(get_icon("spinner" if busy else "volume-2", "#ffffff" if busy else "#10b981", "#10b981", 13))
+                        btns[0].setEnabled(not busy)
                 break
 
     def highlight_segment(self, seg_idx: int):
@@ -539,10 +626,12 @@ class SubtitleEditorWidget(QTableWidget):
                 speed_val = s_orig.get("speed")
                 if speed_val is None:
                     speed_val = fit_info.get("rate", 1.0)
+                it_v = self.item(r, self.COL_VOICE)
+                v_text = it_v.text().strip() if it_v else (combo.currentText() if combo else self._default_voice)
                 data.append({
                     "id": sid_int,
                     "vi_text": item_vi.text().strip() if item_vi else "",
-                    "voice": combo.currentText() if combo else self._default_voice,
+                    "voice": v_text,
                     "speed": float(speed_val or 1.0),
                     "mute_tts": bool(s_orig.get("mute_tts", False)),
                     "mute_sub": bool(s_orig.get("mute_sub", False)),
@@ -560,7 +649,10 @@ class SubtitleEditorWidget(QTableWidget):
             elif item_vi and item_vi.data(Qt.ItemDataRole.UserRole) is not None:
                 s_id = item_vi.data(Qt.ItemDataRole.UserRole)
             if s_id is not None and int(s_id) in selected_ids:
-                combo = self.cellWidget(r, self.COL_VOICE)
+                it_v = self.item(r, self.COL_VOICE)
+                if it_v:
+                    it_v.setText(voice)
+                combo = super().cellWidget(r, self.COL_VOICE)
                 if isinstance(combo, QComboBox):
                     all_items = MALE_VOICES + FEMALE_VOICES
                     pos = all_items.index(voice) if voice in all_items else -1

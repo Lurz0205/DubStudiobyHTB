@@ -46,7 +46,7 @@ def test_driver_compatible_comparison():
 def test_gpu_inspection_no_nvidia():
     with patch("dubstudio.gpu_check.detect_nvidia_gpu_nvml", return_value=None), \
          patch("dubstudio.gpu_check.detect_nvidia_gpu_smi", return_value=None):
-        res = inspect_gpu_and_driver()
+        res = inspect_gpu_and_driver(force_refresh=True)
         assert res["status"] == GPUStatus.NO_NVIDIA
         assert res["recommended_mode"] == "cpu"
 
@@ -58,7 +58,7 @@ def test_gpu_inspection_driver_outdated():
         "driver_version": "512.77",
     }
     with patch("dubstudio.gpu_check.detect_nvidia_gpu_nvml", return_value=fake_info):
-        res = inspect_gpu_and_driver()
+        res = inspect_gpu_and_driver(force_refresh=True)
         assert res["status"] == GPUStatus.DRIVER_OUTDATED_OR_MISSING
         assert res["recommended_mode"] == "cpu"
         assert res["driver_version"] == "512.77"
@@ -71,7 +71,7 @@ def test_gpu_inspection_vram_low():
         "driver_version": "535.104",
     }
     with patch("dubstudio.gpu_check.detect_nvidia_gpu_nvml", return_value=fake_info):
-        res = inspect_gpu_and_driver()
+        res = inspect_gpu_and_driver(force_refresh=True)
         assert res["status"] == GPUStatus.VRAM_LOW
         assert res["recommended_mode"] == "cpu"
 
@@ -83,7 +83,7 @@ def test_gpu_inspection_ok_cuda():
         "driver_version": "550.54",
     }
     with patch("dubstudio.gpu_check.detect_nvidia_gpu_nvml", return_value=fake_info):
-        res = inspect_gpu_and_driver()
+        res = inspect_gpu_and_driver(force_refresh=True)
         assert res["status"] == GPUStatus.OK_CUDA
         assert res["recommended_mode"] == "cuda"
 

@@ -3,7 +3,7 @@ import sys
 import multiprocessing
 
 # 1. Environment & Subsystem Guards
-os.environ.setdefault("QT_MEDIA_BACKEND", "windows")
+os.environ["QT_MEDIA_BACKEND"] = "ffmpeg"
 os.environ.setdefault("NO_PROXY", "127.0.0.1,localhost")
 os.environ.setdefault("PYTHONUTF8", "1")
 
@@ -86,6 +86,7 @@ ensure_runtime_paths()
 
 from dubstudio.logging_setup import setup_app_logging
 _app_logger = setup_app_logging()
+_app_logger.info(f"QT_MEDIA_BACKEND set to: {os.environ.get('QT_MEDIA_BACKEND')}")
 
 if __name__ == "__main__":
     try:

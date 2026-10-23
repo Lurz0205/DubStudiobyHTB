@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QEvent, QObject, QPoint, QRect, QSizeF, QUrl, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QPoint, QRect, QSizeF, QThread, QUrl, Qt, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPen
 from PyQt6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer
 from PyQt6.QtMultimediaWidgets import QGraphicsVideoItem
@@ -268,6 +268,72 @@ class VideoContainerFilter(QObject):
         return super().eventFilter(watched, event)
 
 
+class AudioPrepWorker(QThread):
+    finished = pyqtSignal(int, dict)  # gen_id, results dict
+
+    def __init__(
+        self,
+        generation_id: int,
+        workspace_dir: Optional[Path],
+        custom_bgm_path: Optional[str] = None,
+        vi_voice_vol: float = 1.0,
+        is_rendered_video: bool = False,
+    ):
+        super().__init__()
+        self.gen_id = generation_id
+        self.ws = Path(workspace_dir) if workspace_dir else None
+        self.custom_bgm_path = custom_bgm_path
+        self.vi_voice_vol = vi_voice_vol
+        self.is_rendered = is_rendered_video
+
+    def run(self):
+        if not self.ws or not self.ws.exists() or self.is_rendered:
+            self.finished.emit(self.gen_id, {})
+            return
+
+        res = {}
+        try:
+            # 1. Voice Raw
+            vi_wav = VideoPlayerWidget._ensure_voice_raw(self.ws)
+            if not vi_wav or not vi_wav.exists():
+                vi_wav = (self.ws / "voice_raw.wav") if (self.ws / "voice_raw.wav").exists() else None
+            if not vi_wav or not vi_wav.exists():
+                vi_wav = (self.ws / "voice_track.wav") if (self.ws / "voice_track.wav").exists() else None
+
+            # 2. Effective BGM
+            bgm_wav = VideoPlayerWidget._ensure_effective_bgm(self.ws)
+            if not bgm_wav or not bgm_wav.exists():
+                bgm_wav = (self.ws / "audio" / "bgm.wav") if (self.ws / "audio" / "bgm.wav").exists() else None
+
+            # 3. Vocals
+            vocals_wav = self.ws / "audio" / "vocals.wav"
+            if not vocals_wav.exists():
+                vocals_wav = self.ws / "audio" / "orig.wav"
+
+            if vi_wav and vi_wav.exists():
+                res["vi_raw"] = str(vi_wav.resolve())
+                VideoPlayerWidget._ensure_boosted_track(vi_wav)
+                if self.vi_voice_vol > 1.0:
+                    boosted = vi_wav.parent / "voice_boosted_200.wav"
+                    res["vi_voice"] = str(boosted.resolve()) if boosted.exists() else str(vi_wav.resolve())
+                else:
+                    res["vi_voice"] = str(vi_wav.resolve())
+
+            if bgm_wav and bgm_wav.exists():
+                res["bgm"] = str(bgm_wav.resolve())
+
+            if vocals_wav and vocals_wav.exists():
+                res["vocals"] = str(vocals_wav.resolve())
+
+            if self.custom_bgm_path and Path(self.custom_bgm_path).exists():
+                res["custom_bgm"] = self.custom_bgm_path
+
+        except Exception:
+            pass
+
+        self.finished.emit(self.gen_id, res)
+
+
 class VideoPlayerWidget(QWidget):
     """
     Video player widget with synchronized video and audio using QMediaPlayer.
@@ -286,6 +352,8 @@ class VideoPlayerWidget(QWidget):
         self._multi_track_active = False
         self._video_native_w: int = 1280
         self._video_native_h: int = 720
+        self._audio_prep_worker: Optional[AudioPrepWorker] = None
+        self._current_gen_id: int = 0
 
         self._setup_player()
         self._setup_ui()
@@ -493,18 +561,33 @@ class VideoPlayerWidget(QWidget):
     def load_video(self, path: str, target_pos: float = 0.0):
         self._video_path = path
 
-        # Probe native video resolution for pixel-accurate 1:1 subtitle scaling
-        try:
-            from dubstudio.ffmpeg_utils import probe_file
-            info = probe_file(Path(path))
-            for s in info.get("streams", []):
-                if s.get("codec_type") == "video":
-                    self._video_native_w = int(s.get("width") or 1280)
-                    self._video_native_h = int(s.get("height") or 720)
-                    break
-        except Exception:
-            self._video_native_w = 1280
-            self._video_native_h = 720
+        # Fast metadata resolution from probe.json without executing ffprobe
+        p_json = Path(path).parent / "probe.json"
+        if p_json.exists():
+            try:
+                import json
+                pdata = json.loads(p_json.read_text(encoding="utf-8"))
+                v_info = pdata.get("video", {})
+                self._video_native_w = int(v_info.get("width") or 1280)
+                self._video_native_h = int(v_info.get("height") or 720)
+            except Exception:
+                self._video_native_w = 1280
+                self._video_native_h = 720
+        else:
+            # Probe native video resolution in background thread so Main GUI thread never blocks
+            def _bg_probe():
+                try:
+                    from dubstudio.ffmpeg_utils import probe_file
+                    info = probe_file(Path(path))
+                    for s in info.get("streams", []):
+                        if s.get("codec_type") == "video":
+                            self._video_native_w = int(s.get("width") or 1280)
+                            self._video_native_h = int(s.get("height") or 720)
+                            break
+                except Exception:
+                    pass
+            import threading
+            threading.Thread(target=_bg_probe, daemon=True).start()
 
         # Always ensure audio is unmuted and at 100% volume for newly loaded video
         self._audio_output.setMuted(False)
@@ -777,30 +860,9 @@ class VideoPlayerWidget(QWidget):
         vi_voice_vol: float = 1.0,
         is_rendered_video: bool = False,
     ):
-        """Configure audio stems for synchronized multi-track playback."""
+        """Configure audio stems for synchronized multi-track playback asynchronously."""
         ws = Path(workspace_dir) if workspace_dir else None
-        # Always prioritize raw voice (without pre-baked BGM) so Track 1 and Track 2 are strictly independent!
-        vi_wav = self._ensure_voice_raw(ws) if ws else None
-        if not vi_wav or not vi_wav.exists():
-            vi_wav = (ws / "voice_raw.wav") if ws and (ws / "voice_raw.wav").exists() else None
-        if not vi_wav or not vi_wav.exists():
-            vi_wav = (ws / "voice_track.wav") if ws else None
-
-        bgm_wav = self._ensure_effective_bgm(ws) if ws else None
-        if not bgm_wav or not bgm_wav.exists():
-            bgm_wav = (ws / "audio" / "bgm.wav") if ws else None
-        vocals_wav = (ws / "audio" / "vocals.wav") if ws else None
-        if vocals_wav and not vocals_wav.exists():
-            vocals_wav = ws / "audio" / "orig.wav" if ws else None
-
-        has_vi = bool(vi_wav and vi_wav.exists())
-        has_bgm = bool(bgm_wav and bgm_wav.exists())
-        has_vocals = bool(vocals_wav and vocals_wav.exists())
-        has_custom = bool(custom_bgm_path and Path(custom_bgm_path).exists())
-
-        can_multi_track = (has_vi or has_bgm or has_vocals or has_custom) and not is_rendered_video
-        if not can_multi_track:
-            # No stems available (or final rendered video): Play audio directly from video file
+        if not ws or not ws.exists() or is_rendered_video:
             self._multi_track_active = False
             self._audio_output.setMuted(False)
             self._audio_output.setVolume(1.0)
@@ -809,47 +871,87 @@ class VideoPlayerWidget(QWidget):
 
         self._multi_track_active = True
         self._audio_output.setMuted(True)
-        self._audio_output.setVolume(0.0)  # Mute embedded video audio so separate stems mix cleanly
+        self._audio_output.setVolume(0.0)
 
-        # 1. Vi voice
-        if has_vi:
-            self._vi_voice_raw_path = str(vi_wav.resolve())
-            self._ensure_boosted_track(vi_wav)
-            if vi_voice_vol > 1.0:
-                boosted = vi_wav.parent / "voice_boosted_200.wav"
-                target_src = str(boosted.resolve()) if boosted.exists() else str(vi_wav.resolve())
-            else:
-                target_src = str(vi_wav.resolve())
-            self._vi_voice_path = target_src
-            self._vi_voice_player.setSource(QUrl.fromLocalFile(target_src))
-        else:
-            self._vi_voice_raw_path = None
-            self._vi_voice_path = None
-            self._vi_voice_player.setSource(QUrl())
+        # Store volumes immediately
         self.set_vi_voice_volume(vi_voice_vol)
-
-        # 2. Orig BGM
-        if has_bgm:
-            self._orig_bgm_path = str(bgm_wav.resolve())
-            self._orig_bgm_player.setSource(QUrl.fromLocalFile(self._orig_bgm_path))
-        else:
-            self._orig_bgm_path = None
-            self._orig_bgm_player.setSource(QUrl())
         self.set_orig_bgm_volume(orig_bgm_vol)
-
-        # 3. Custom BGM
         self.set_custom_bgm(custom_bgm_path, custom_bgm_vol)
+        self.set_orig_voice_volume(orig_voice_vol, include_orig_voice)
 
-        # 4. Orig voice (if has_vi is False, play original vocals so speech is audible)
-        if has_vocals:
-            self._orig_voice_path = str(vocals_wav.resolve())
+        # Fast path: Bind already existing cached files immediately in 0 ms
+        fast_vi = (ws / "voice_raw.wav") if (ws / "voice_raw.wav").exists() else ((ws / "voice_track.wav") if (ws / "voice_track.wav").exists() else None)
+        fast_bgm = (ws / "bgm_effective.wav") if (ws / "bgm_effective.wav").exists() else ((ws / "audio" / "bgm.wav") if (ws / "audio" / "bgm.wav").exists() else None)
+        fast_voc = (ws / "audio" / "vocals.wav") if (ws / "audio" / "vocals.wav").exists() else ((ws / "audio" / "orig.wav") if (ws / "audio" / "orig.wav").exists() else None)
+
+        if fast_vi:
+            self._vi_voice_path = str(fast_vi.resolve())
+            self._vi_voice_player.setSource(QUrl.fromLocalFile(self._vi_voice_path))
+        if fast_bgm:
+            self._orig_bgm_path = str(fast_bgm.resolve())
+            self._orig_bgm_player.setSource(QUrl.fromLocalFile(self._orig_bgm_path))
+        if fast_voc:
+            self._orig_voice_path = str(fast_voc.resolve())
             self._orig_voice_player.setSource(QUrl.fromLocalFile(self._orig_voice_path))
-            actual_orig_vol = orig_voice_vol if has_vi else 1.0
-            actual_include = include_orig_voice if has_vi else True
-            self.set_orig_voice_volume(actual_orig_vol, actual_include)
-        else:
-            self._orig_voice_path = None
-            self._orig_voice_player.setSource(QUrl())
+
+        # Launch background prep worker with generation ID to assemble/boost tracks asynchronously
+        self._current_gen_id += 1
+        gen_id = self._current_gen_id
+
+        if self._audio_prep_worker and self._audio_prep_worker.isRunning():
+            try:
+                self._audio_prep_worker.finished.disconnect()
+            except Exception:
+                pass
+
+        worker = AudioPrepWorker(
+            generation_id=gen_id,
+            workspace_dir=ws,
+            custom_bgm_path=custom_bgm_path,
+            vi_voice_vol=vi_voice_vol,
+            is_rendered_video=is_rendered_video,
+        )
+        worker.finished.connect(self._on_audio_prep_finished)
+        self._audio_prep_worker = worker
+        worker.start()
+
+    def _on_audio_prep_finished(self, gen_id: int, res: dict):
+        if gen_id != self._current_gen_id:
+            # Stale generation from previous job, discard
+            return
+
+        if not res or not self._multi_track_active:
+            return
+
+        pos = self._player.position()
+        is_playing = (self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState)
+
+        if "vi_voice" in res:
+            target_vi = res["vi_voice"]
+            if getattr(self, "_vi_voice_path", None) != target_vi:
+                self._vi_voice_path = target_vi
+                self._vi_voice_player.setSource(QUrl.fromLocalFile(target_vi))
+                self._vi_voice_player.setPosition(pos)
+                if is_playing:
+                    self._vi_voice_player.play()
+
+        if "bgm" in res:
+            target_bgm = res["bgm"]
+            if getattr(self, "_orig_bgm_path", None) != target_bgm:
+                self._orig_bgm_path = target_bgm
+                self._orig_bgm_player.setSource(QUrl.fromLocalFile(target_bgm))
+                self._orig_bgm_player.setPosition(pos)
+                if is_playing:
+                    self._orig_bgm_player.play()
+
+        if "vocals" in res:
+            target_voc = res["vocals"]
+            if getattr(self, "_orig_voice_path", None) != target_voc:
+                self._orig_voice_path = target_voc
+                self._orig_voice_player.setSource(QUrl.fromLocalFile(target_voc))
+                self._orig_voice_player.setPosition(pos)
+                if is_playing:
+                    self._orig_voice_player.play()
 
     def load_audio_tracks(
         self,

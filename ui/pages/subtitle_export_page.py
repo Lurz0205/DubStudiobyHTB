@@ -111,6 +111,11 @@ class SubtitleExportPage(QWidget):
         self._vi_boost_timer.setInterval(120)
         self._vi_boost_timer.timeout.connect(self._apply_vi_boost)
 
+        self._save_debounce_timer = QTimer(self)
+        self._save_debounce_timer.setSingleShot(True)
+        self._save_debounce_timer.setInterval(300)
+        self._save_debounce_timer.timeout.connect(self._do_async_save_style)
+
         self._setup_ui()
 
 
@@ -986,70 +991,91 @@ class SubtitleExportPage(QWidget):
         )
 
     def _save_style_to_job(self):
-        # 1. Always auto-save typography & box style into global preset file for all future jobs
-        try:
-            GLOBAL_PRESET_FILE.parent.mkdir(parents=True, exist_ok=True)
-            GLOBAL_PRESET_FILE.write_text(json.dumps(self._style, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+        # Debounce high-frequency slider movements; UI visual preview updates immediately
+        if hasattr(self, "_save_debounce_timer"):
+            self._save_debounce_timer.start()
+        else:
+            self._do_async_save_style()
 
-        if not self._current_job_id:
+    def _do_async_save_style(self):
+        if not hasattr(self, "_style"):
             return
+        style_copy = dict(self._style)
+        job_id = self._current_job_id
 
-        # 2. Immediately write style.json and mix_settings.json directly into current workspace on disk
-        try:
-            ws_dir = Path("workspace") / self._current_job_id
-            ws_dir.mkdir(parents=True, exist_ok=True)
-            ws_style = ws_dir / "style.json"
-            ws_style.write_text(json.dumps(self._style, ensure_ascii=False, indent=2), encoding="utf-8")
+        def _bg_save():
+            # 1. Global preset write
+            try:
+                GLOBAL_PRESET_FILE.parent.mkdir(parents=True, exist_ok=True)
+                GLOBAL_PRESET_FILE.write_text(json.dumps(style_copy, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
 
-            mix_file = ws_dir / "mix_settings.json"
-            orig_bgm_vol = float(self._style.get("orig_bgm_volume", self._style.get("bgm_volume", 0.80)))
-            existing_ranges = []
-            if mix_file.exists():
-                try:
-                    old_mix = json.loads(mix_file.read_text(encoding="utf-8"))
-                    existing_ranges = old_mix.get("keep_original_ranges", [])
-                except Exception:
-                    pass
-            ranges_file = ws_dir / "orig_audio_ranges.json"
-            if not existing_ranges and ranges_file.exists():
-                try:
-                    r_raw = json.loads(ranges_file.read_text(encoding="utf-8"))
-                    existing_ranges = [[float(r["start"]), float(r["end"])] for r in r_raw if "start" in r and "end" in r]
-                except Exception:
-                    pass
+            if not job_id:
+                return
 
-            mix_file.write_text(
-                json.dumps(
-                    {
-                        "orig_bgm_volume": orig_bgm_vol,
-                        "bgm_volume": orig_bgm_vol,
-                        "custom_bgm_path": self._style.get("custom_bgm_path"),
-                        "custom_bgm_volume": float(self._style.get("custom_bgm_volume", 0.50)),
-                        "include_orig_voice": bool(self._style.get("include_orig_voice", False)),
-                        "orig_voice_volume": float(self._style.get("orig_voice_volume", 0.00)),
-                        "vi_voice_volume": float(self._style.get("vi_voice_volume", 1.00)),
-                        "keep_original_ranges": existing_ranges,
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
-        except Exception:
-            pass
+            # 2. Workspace style and mix_settings
+            try:
+                from dubstudio.paths import get_workspace_dir
+                ws_dir = Path("workspace") / job_id
+                if not ws_dir.exists():
+                    ws_dir = get_workspace_dir() / job_id
+                ws_dir.mkdir(parents=True, exist_ok=True)
 
-        # 3. Also notify the API server
-        import requests
-        try:
-            requests.post(
-                f"http://127.0.0.1:8765/api/jobs/{self._current_job_id}/style",
-                json=self._style,
-                timeout=1,
-            )
-        except Exception:
-            pass
+                ws_style = ws_dir / "style.json"
+                ws_style.write_text(json.dumps(style_copy, ensure_ascii=False, indent=2), encoding="utf-8")
+
+                mix_file = ws_dir / "mix_settings.json"
+                orig_bgm_vol = float(style_copy.get("orig_bgm_volume", style_copy.get("bgm_volume", 0.80)))
+                existing_ranges = []
+                if mix_file.exists():
+                    try:
+                        old_mix = json.loads(mix_file.read_text(encoding="utf-8"))
+                        existing_ranges = old_mix.get("keep_original_ranges", [])
+                    except Exception:
+                        pass
+                ranges_file = ws_dir / "orig_audio_ranges.json"
+                if not existing_ranges and ranges_file.exists():
+                    try:
+                        r_raw = json.loads(ranges_file.read_text(encoding="utf-8"))
+                        existing_ranges = [[float(r["start"]), float(r["end"])] for r in r_raw if "start" in r and "end" in r]
+                    except Exception:
+                        pass
+
+                mix_file.write_text(
+                    json.dumps(
+                        {
+                            "orig_bgm_volume": orig_bgm_vol,
+                            "bgm_volume": orig_bgm_vol,
+                            "custom_bgm_path": style_copy.get("custom_bgm_path"),
+                            "custom_bgm_volume": float(style_copy.get("custom_bgm_volume", 0.50)),
+                            "include_orig_voice": bool(style_copy.get("include_orig_voice", False)),
+                            "orig_voice_volume": float(style_copy.get("orig_voice_volume", 0.00)),
+                            "vi_voice_volume": float(style_copy.get("vi_voice_volume", 1.00)),
+                            "keep_original_ranges": existing_ranges,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+            except Exception:
+                pass
+
+            # 3. Notify API server via shared pooled session
+            try:
+                from ui.workers import get_shared_session, get_base_url
+                sess = get_shared_session()
+                sess.post(
+                    f"{get_base_url()}/api/jobs/{job_id}/style",
+                    json=style_copy,
+                    timeout=2,
+                )
+            except Exception:
+                pass
+
+        import threading
+        threading.Thread(target=_bg_save, daemon=True).start()
 
     def _reset_style_to_default(self):
         """Reset subtitle formatting to factory default settings."""
@@ -1097,8 +1123,15 @@ class SubtitleExportPage(QWidget):
         self._save_style_to_job()
 
         # Find best candidate video to send to merge page
+        from dubstudio.paths import get_workspace_dir, get_out_dir
         ws_dir = Path("workspace") / self._current_job_id
+        if not ws_dir.exists():
+            ws_dir = get_workspace_dir() / self._current_job_id
+
         rendered_mp4 = Path("out") / f"{self._current_job_id}_vi.mp4"
+        if not rendered_mp4.exists():
+            rendered_mp4 = get_out_dir() / f"{self._current_job_id}_vi.mp4"
+
         prev_dub = ws_dir / "preview_dubbed.mp4"
         in_mp4 = ws_dir / "input.mp4"
 
