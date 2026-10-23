@@ -61,14 +61,23 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
             from funasr import AutoModel
             from funasr.utils.postprocess_utils import rich_transcription_postprocess
 
-            model_dir = Path("models/SenseVoiceSmall")
+            from dubstudio.paths import get_models_dir, get_app_dir
+            models_root = get_models_dir()
+            candidates = [
+                models_root / "SenseVoiceSmall",
+                Path("models/SenseVoiceSmall"),
+                get_app_dir() / "models" / "SenseVoiceSmall",
+                Path(sys.executable).parent / "models" / "SenseVoiceSmall",
+                Path(sys.executable).parent.parent / "models" / "SenseVoiceSmall",
+            ]
+            model_dir = next((c for c in candidates if c.exists()), None)
             vad_kwargs = {
                 "max_single_segment_time": 6000,
                 "max_end_silence_time": 400,
                 "speech_noise_thres": 0.6,
             }
             asr_model = AutoModel(
-                model=str(model_dir.resolve()) if model_dir.exists() else "FunAudioLLM/SenseVoiceSmall",
+                model=str(model_dir.resolve()) if model_dir else "FunAudioLLM/SenseVoiceSmall",
                 vad_model="fsmn-vad",
                 vad_kwargs=vad_kwargs,
                 device=device if device == "cpu" else "cuda:0",
@@ -134,12 +143,13 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
         else:
             from faster_whisper import WhisperModel
 
+            from dubstudio.paths import get_models_dir
             emit_event(stage_name, 10.0, f"Khởi tạo faster-whisper ({device})...")
             model = WhisperModel(
                 cfg.asr.model_size,
                 device=device,
                 compute_type=compute_type,
-                download_root="models",
+                download_root=str(get_models_dir().resolve()),
             )
 
             emit_event(stage_name, 40.0, "Đang trích xuất phụ đề tiếng Trung với word timestamps...")
