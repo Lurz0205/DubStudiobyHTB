@@ -3,24 +3,44 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from dubstudio.components import check_for_component_updates
 from dubstudio.packaging import is_packaged, get_user_data_dir
+from dubstudio.version import APP_VERSION
 
 GITHUB_REPO = "Lurz0205/DubStudiobyHTB"
-CURRENT_VERSION = "1.1.0"
+CURRENT_VERSION = APP_VERSION
 
 
-def check_github_releases(timeout: float = 5.0) -> Optional[Dict[str, Any]]:
+def parse_semver(v: str) -> Tuple[int, ...]:
+    """Parse semver string (e.g. 'v1.1.1', '1.10.0') into tuple of integers."""
+    if not v:
+        return (0, 0, 0)
+    clean = str(v).strip().lstrip("v").split("+")[0].split("-")[0]
+    nums = [int(x) for x in re.findall(r"\d+", clean)]
+    while len(nums) < 3:
+        nums.append(0)
+    return tuple(nums)
+
+
+def check_github_releases(timeout: float = 6.0) -> Optional[Dict[str, Any]]:
     """Check latest release on GitHub repository."""
     url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
     try:
-        resp = requests.get(url, timeout=timeout, headers={"Accept": "application/vnd.github.v3+json"})
+        resp = requests.get(
+            url,
+            timeout=timeout,
+            headers={
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": f"DubStudio-Updater/{CURRENT_VERSION}",
+            },
+        )
         if resp.status_code == 200:
             return resp.json()
     except Exception:
@@ -28,27 +48,46 @@ def check_github_releases(timeout: float = 5.0) -> Optional[Dict[str, Any]]:
     return None
 
 
-def check_all_updates() -> Dict[str, Any]:
+def check_all_updates(timeout: float = 6.0) -> Dict[str, Any]:
     """Check both GitHub app version updates and modular components updates."""
     result: Dict[str, Any] = {
+        "success": False,
         "has_app_update": False,
         "latest_version": CURRENT_VERSION,
         "current_version": CURRENT_VERSION,
         "release_notes": "",
-        "download_url": "",
+        "download_url": f"https://github.com/{GITHUB_REPO}/releases",
+        "setup_asset_url": "",
+        "setup_asset_size": 0,
         "component_updates": [],
         "missing_components": [],
+        "network_error": None,
     }
 
     # 1. GitHub app version
-    gh_data = check_github_releases()
-    if gh_data:
-        tag = gh_data.get("tag_name", "").lstrip("v")
-        if tag and tag > CURRENT_VERSION:
-            result["has_app_update"] = True
-            result["latest_version"] = tag
-            result["release_notes"] = gh_data.get("body", "")
-            result["download_url"] = gh_data.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
+    try:
+        gh_data = check_github_releases(timeout=timeout)
+        if gh_data:
+            result["success"] = True
+            tag = gh_data.get("tag_name", "").lstrip("v")
+            if tag:
+                result["latest_version"] = tag
+                if parse_semver(tag) > parse_semver(CURRENT_VERSION):
+                    result["has_app_update"] = True
+                result["release_notes"] = gh_data.get("body", "") or ""
+                result["download_url"] = gh_data.get("html_url", result["download_url"])
+
+                # Find Setup.exe installer asset
+                for asset in gh_data.get("assets", []):
+                    name = asset.get("name", "").lower()
+                    if name.endswith("setup.exe") or ("setup" in name and name.endswith(".exe")):
+                        result["setup_asset_url"] = asset.get("browser_download_url", "")
+                        result["setup_asset_size"] = int(asset.get("size", 0))
+                        break
+        else:
+            result["network_error"] = "Không thể lấy thông tin phiên bản từ máy chủ GitHub (hết thời gian chờ hoặc không có mạng)."
+    except Exception as e:
+        result["network_error"] = str(e)
 
     # 2. Components
     try:
@@ -64,7 +103,6 @@ def check_all_updates() -> Dict[str, Any]:
 
         manifest = fetch_components_manifest()
         # Determine currently selected ASR model from config / env
-        import os
         from dubstudio.config import AppConfig
         try:
             cfg = AppConfig.load()

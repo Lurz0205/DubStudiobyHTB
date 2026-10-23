@@ -13,18 +13,24 @@ from dubstudio.text.spoken_cleaner import sanitize_spoken_vietnamese
 
 class FitRewriter:
     def __init__(self, cfg: AppConfig, cache_dir: Optional[Path] = None) -> None:
-        self.provider = getattr(cfg.translation, "provider", None) or os.getenv("TRANSLATION_PROVIDER")
+        raw_prov = getattr(cfg.translation, "provider", None) or os.getenv("TRANSLATION_PROVIDER")
+        if raw_prov in ("gemini", "groq", "deepseek", "openrouter", "manual"):
+            self.provider = raw_prov
+        else:
+            self.provider = "gemini_web"
+
         self.cdp_port = getattr(cfg.translation, "cdp_port", 9222)
         self.api_key = cfg.gemini_api_key or os.getenv("GEMINI_API_KEY")
         self.model = cfg.translation.model or "gemini-2.5-flash"
         self.cache_dir = cache_dir or Path("workspace/.cache/llm")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.prompt_template_path = Path("dubstudio/llm/prompts/fit_rewrite.md")
-        self.cluster_prompt_path = Path("dubstudio/llm/prompts/cluster_rewrite.md")
+        base_dir = Path(__file__).parent
+        self.prompt_template_path = base_dir / "prompts" / "fit_rewrite.md"
+        self.cluster_prompt_path = base_dir / "prompts" / "cluster_rewrite.md"
 
     def _can_use_cdp(self) -> bool:
-        from dubstudio.llm.cdp_gemini import is_cdp_ready
-        return is_cdp_ready(self.cdp_port)
+        from dubstudio.llm.cdp_gemini import is_cdp_ready, find_browser_executable
+        return is_cdp_ready(self.cdp_port) or bool(find_browser_executable())
 
     def rewrite_units(
         self,

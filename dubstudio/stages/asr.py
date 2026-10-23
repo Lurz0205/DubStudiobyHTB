@@ -150,7 +150,7 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
             res = asr_model.generate(
                 input=str(input_audio.resolve()),
                 cache={},
-                language="zn",
+                language="zh",
                 use_itn=True,
                 batch_size_s=60,
                 merge_vad=False,

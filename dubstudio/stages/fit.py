@@ -262,13 +262,26 @@ def run(job: JobContext, cfg: AppConfig) -> None:
     ALLOWABLE_OVERLAP = 0.10
     MAX_REWRITE_PASSES = 3
 
-    from dubstudio.llm.cdp_gemini import is_cdp_ready
+    from dubstudio.llm.cdp_gemini import is_cdp_ready, find_browser_executable
     cdp_port = getattr(cfg.translation, "cdp_port", 9222)
-    is_gemini_web = (getattr(cfg.translation, "provider", "") == "gemini_web") or is_cdp_ready(cdp_port)
+    has_browser = bool(find_browser_executable())
 
+    trans_provider = getattr(cfg.translation, "provider", "gemini_web")
+    job_conf = job.workspace / "job_config.json"
+    if job_conf.exists():
+        try:
+            jdata = json.loads(job_conf.read_text(encoding="utf-8"))
+            if jdata.get("translation_provider"):
+                trans_provider = jdata["translation_provider"]
+        except Exception:
+            pass
+
+    is_gemini_web = (trans_provider == "gemini_web") or is_cdp_ready(cdp_port) or has_browser
     has_api_key = bool(
         cfg.gemini_api_key
         or os.getenv("GEMINI_API_KEY")
+        or getattr(cfg.translation, "groq_api_key", None)
+        or os.getenv("GROQ_API_KEY")
     )
     can_rewrite = has_api_key or is_gemini_web
 

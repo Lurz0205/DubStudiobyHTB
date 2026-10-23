@@ -195,6 +195,14 @@ def check_for_component_updates(feed_url: Optional[str] = None) -> List[Dict[str
         inst = installed.get(pkg_id)
         inst_ver = int(inst.get("version", 0)) if inst else 0
 
+        # An update only applies to packages that are already installed on this machine,
+        # or packages marked as required for the app to function.
+        # Optional uninstalled models (e.g. faster-whisper when user uses SenseVoice) must NOT be nagged as "updates"!
+        ready, _ = is_component_ready(pkg_id)
+        is_installed = bool(inst) or ready
+        if not is_installed and not pkg.get("required"):
+            continue
+
         if inst_ver < latest_ver:
             available_updates.append({
                 "package": pkg,

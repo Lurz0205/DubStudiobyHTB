@@ -9,6 +9,11 @@ os.environ.setdefault("PYTHONUTF8", "1")
 
 # 2. CRITICAL: Prevent infinite subprocess window spawning on Windows PyInstaller
 multiprocessing.freeze_support()
+try:
+    import velopack
+    velopack.App().run()
+except Exception:
+    pass
 
 # 3. Windowed Mode Stream Guards: ensure sys.stdin, sys.stdout, sys.stderr are NEVER None
 if sys.stdin is None:

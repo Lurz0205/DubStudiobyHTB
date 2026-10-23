@@ -610,6 +610,19 @@ class DownloadComponentWorker(QThread):
             self.error.emit(pkg_id, str(e))
 
 
+class CheckUpdatesWorker(QThread):
+    """Background worker to check for GitHub releases and modular components updates without freezing UI."""
+    finished = pyqtSignal(dict)
+
+    def run(self):
+        try:
+            from dubstudio.updater import check_all_updates
+            res = check_all_updates()
+            self.finished.emit(res)
+        except Exception as e:
+            self.finished.emit({"network_error": str(e), "success": False})
+
+
 class StartupCheckWorker(QThread):
     """Scan physical components on disk, sync installed.json, and check for updates."""
     finished = pyqtSignal(dict)
@@ -621,6 +634,142 @@ class StartupCheckWorker(QThread):
             self.finished.emit(res)
         except Exception:
             self.finished.emit({})
+
+
+class AppUpdateWorker(QThread):
+    """Download and prepare Velopack app update with live progress and triple-tier fallback."""
+    progress = pyqtSignal(int, str)
+    finished = pyqtSignal(object)
+    error = pyqtSignal(str)
+
+    def __init__(
+        self,
+        repo_url: str = "https://github.com/Lurz0205/DubStudiobyHTB",
+        setup_url: str = "",
+        setup_size: int = 0,
+    ):
+        super().__init__()
+        self.repo_url = repo_url
+        self.setup_url = setup_url
+        self.setup_size = setup_size
+
+    def run(self):
+        # 1. Try native Velopack UpdateManager (ultra fast delta packages)
+        try:
+            self.progress.emit(10, "Đang kết nối tới máy chủ GitHub...")
+            import velopack
+            src = velopack.GithubSource(self.repo_url)
+            mgr = velopack.UpdateManager(src)
+
+            self.progress.emit(20, "Đang kiểm tra gói cập nhật...")
+            update_info = mgr.check_for_updates()
+            if not update_info:
+                self.progress.emit(100, "Đang là phiên bản mới nhất.")
+                self.finished.emit(None)
+                return
+
+            self.progress.emit(30, "Đang tải bản cập nhật delta patch...")
+
+            def _on_prog(pct):
+                p = 30 + int(pct * 0.65)
+                self.progress.emit(min(95, p), f"Đang tải bản cập nhật: {pct}%")
+
+            mgr.download_updates(update_info, progress_callback=_on_prog)
+            self.progress.emit(100, "Tải và cài đặt hoàn tất!")
+            self.finished.emit({"mgr": mgr, "info": update_info})
+            return
+        except Exception:
+            pass
+
+        # 2. Try Velopack Update.exe if available on user machine
+        try:
+            from dubstudio.packaging import get_velopack_updater
+            updater = get_velopack_updater()
+            if updater and Path(updater).exists():
+                self.progress.emit(35, "Đang cập nhật qua Velopack Updater...")
+                import subprocess
+                proc = subprocess.Popen(
+                    [str(updater), "--update", self.repo_url],
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                proc.wait(timeout=180)
+                if proc.returncode == 0:
+                    self.progress.emit(100, "Cập nhật hoàn tất!")
+                    self.finished.emit({"fallback": True})
+                    return
+        except Exception:
+            pass
+
+        # 3. Direct Installer Download Fallback (Resilient stream with atomic temp file)
+        try:
+            import requests, tempfile
+            from pathlib import Path
+
+            download_url = self.setup_url
+            total_size = self.setup_size
+
+            # If setup url wasn't pre-fetched, query GitHub API
+            if not download_url:
+                self.progress.emit(15, "Đang tìm bộ cài đặt mới nhất trên GitHub...")
+                rel_url = f"https://api.github.com/repos/Lurz0205/DubStudiobyHTB/releases/latest"
+                rel_resp = requests.get(rel_url, timeout=10, headers={"Accept": "application/vnd.github.v3+json"})
+                if rel_resp.status_code == 200:
+                    assets = rel_resp.json().get("assets", [])
+                    setup_asset = next((a for a in assets if a.get("name", "").lower().endswith("setup.exe")), None)
+                    if setup_asset:
+                        download_url = setup_asset.get("browser_download_url", "")
+                        total_size = int(setup_asset.get("size", 0))
+
+            if download_url:
+                total_size = max(1, total_size)
+                temp_dir = Path(tempfile.gettempdir()) / "DubStudio_Update"
+                temp_dir.mkdir(parents=True, exist_ok=True)
+                dest_exe = temp_dir / "DubStudio-Setup.exe"
+                tmp_part = temp_dir / "DubStudio-Setup.exe.part"
+
+                if tmp_part.exists():
+                    try:
+                        tmp_part.unlink()
+                    except Exception:
+                        pass
+
+                downloaded = 0
+                self.progress.emit(25, "Đang tải bộ cài đặt mới từ GitHub...")
+                with requests.get(download_url, stream=True, timeout=30) as r:
+                    r.raise_for_status()
+                    with open(tmp_part, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=256 * 1024):
+                            if self.isInterruptionRequested():
+                                try:
+                                    tmp_part.unlink()
+                                except Exception:
+                                    pass
+                                return
+                            if chunk:
+                                f.write(chunk)
+                                downloaded += len(chunk)
+                                pct = min(99, int((downloaded / total_size) * 100))
+                                mb_down = downloaded // (1024 * 1024)
+                                mb_tot = total_size // (1024 * 1024)
+                                self.progress.emit(pct, f"Đang tải bộ cài: {pct}% ({mb_down} MB / {mb_tot} MB)")
+
+                # Atomic swap once download finishes 100%
+                if dest_exe.exists():
+                    try:
+                        dest_exe.unlink()
+                    except Exception:
+                        pass
+                tmp_part.rename(dest_exe)
+
+                self.progress.emit(100, "Tải bộ cài đặt hoàn tất!")
+                self.finished.emit({"installer_path": str(dest_exe.resolve())})
+                return
+        except Exception as e:
+            self.error.emit(f"Không thể tải bản cập nhật: {e}")
+            return
+
+        self.error.emit("Không tìm thấy gói cập nhật phù hợp trên máy chủ GitHub.")
+
 
 
 

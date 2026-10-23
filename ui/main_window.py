@@ -252,6 +252,13 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("● Sẵn sàng làm việc.")
         self.setStatusBar(self.status_bar)
 
+        from dubstudio.version import APP_VERSION
+        from dubstudio.packaging import is_packaged
+        ver_text = f"v{APP_VERSION} (Đóng gói)" if is_packaged() else f"v{APP_VERSION} (Dev)"
+        self._lbl_version = QLabel(f" {ver_text} ")
+        self._lbl_version.setStyleSheet("color: #888888; font-weight: bold; font-size: 11px; padding-right: 8px;")
+        self.status_bar.addPermanentWidget(self._lbl_version)
+
         # Pre-warm TTS worker in background so TTS generation and single-sentence preview is instant
         try:
             from ui.workers import WarmTTSWorker
@@ -385,7 +392,7 @@ class MainWindow(QMainWindow):
                 pass
 
         # Map ASR
-        if str(asr_val).lower() in ("sensevoice-small", "sensevoice_small", "sensevoice"):
+        if "sensevoice" in str(asr_val).lower():
             asr_pkg = "sensevoice_small"
             asr_name = "SenseVoice-Small"
         else:
@@ -432,14 +439,26 @@ class MainWindow(QMainWindow):
         return (len(missing) == 0, info, missing)
 
     def _on_check_updates_clicked(self):
-        """Check for GitHub release updates, modular components updates, and active model readiness."""
+        """Check for GitHub release updates and AI models asynchronously without freezing the UI."""
+        self.status_bar.showMessage("Đang kiểm tra cập nhật từ GitHub và trạng thái mô hình...")
+        if hasattr(self, "_btn_check_updates"):
+            self._btn_check_updates.setEnabled(False)
+
+        from ui.workers import CheckUpdatesWorker
+        self._check_worker = CheckUpdatesWorker()
+        self._check_worker.finished.connect(self._on_check_updates_finished)
+        self._check_worker.start()
+
+    def _on_check_updates_finished(self, res: dict):
+        """Handle results of update check with clear user dialogs and one-click actions."""
         from PyQt6.QtWidgets import QMessageBox
         from PyQt6.QtCore import QUrl
         from PyQt6.QtGui import QDesktopServices
-        from dubstudio.updater import check_all_updates, CURRENT_VERSION
+        from dubstudio.updater import CURRENT_VERSION
+        from dubstudio.packaging import is_packaged
 
-        self.status_bar.showMessage("Đang kiểm tra cập nhật từ GitHub và trạng thái mô hình...")
-        res = check_all_updates()
+        if hasattr(self, "_btn_check_updates"):
+            self._btn_check_updates.setEnabled(True)
         self.status_bar.showMessage("● Sẵn sàng làm việc.")
 
         # Always refresh settings components view so badges are 100% up-to-date
@@ -449,50 +468,77 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-        has_app = res.get("has_app_update", False)
-        comp_updates = res.get("component_updates", [])
-
-        # 1. Check App version update on GitHub
-        if has_app:
-            latest = res.get("latest_version")
-            from dubstudio.packaging import is_packaged, trigger_app_update, get_velopack_updater
-            updater = get_velopack_updater()
-            if is_packaged() and updater:
-                msg = f"Đã có phiên bản mới v{latest}!\nBạn có muốn tự động tải và cập nhật ngay bây giờ không?"
-                reply = QMessageBox.question(
-                    self,
-                    "Cập nhật ứng dụng",
-                    msg,
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                )
-                if reply == QMessageBox.StandardButton.Yes:
-                    update_url = "https://github.com/Lurz0205/DubStudiobyHTB/releases"
-                    self.status_bar.showMessage("Đang tải bản cập nhật ngầm qua Velopack...")
-                    triggered = trigger_app_update(update_url)
-                    if triggered:
-                        QMessageBox.information(
-                            self,
-                            "Đang cập nhật",
-                            "Bản cập nhật đang được tải ngầm.\nỨng dụng sẽ tự động áp dụng phiên bản mới khi bạn mở lại chương trình.",
-                        )
-                    else:
-                        dl_url = res.get("download_url") or update_url
-                        QDesktopServices.openUrl(QUrl(dl_url))
-                return
-
-            msg = f"Đã có phiên bản mới v{latest} trên GitHub!\n(Phiên bản hiện tại của bạn: v{CURRENT_VERSION})\n\nBạn có muốn mở trang tải bản cập nhật mới không?"
-            reply = QMessageBox.question(
-                self,
-                "Bản cập nhật mới",
-                msg,
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        # 1. Handle network or API error
+        if not res.get("success", False) and res.get("network_error"):
+            err_msg = res.get("network_error")
+            msg_box = QMessageBox(self)
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.setWindowTitle("Lỗi kiểm tra cập nhật")
+            msg_box.setText(
+                f"Không thể kết nối đến máy chủ cập nhật GitHub:\n{err_msg}\n\n"
+                "Bạn có muốn mở trang GitHub Releases trên trình duyệt để kiểm tra trực tiếp không?"
             )
-            if reply == QMessageBox.StandardButton.Yes:
-                dl_url = res.get("download_url") or "https://github.com/Lurz0205/DubStudiobyHTB/releases"
-                QDesktopServices.openUrl(QUrl(dl_url))
+            btn_web = msg_box.addButton("Mở trang GitHub", QMessageBox.ButtonRole.AcceptRole)
+            msg_box.addButton("Đóng", QMessageBox.ButtonRole.RejectRole)
+            msg_box.exec()
+            if msg_box.clickedButton() == btn_web:
+                QDesktopServices.openUrl(QUrl(res.get("download_url") or "https://github.com/Lurz0205/DubStudiobyHTB/releases"))
             return
 
-        # 2. Check modular component updates
+        has_app = res.get("has_app_update", False)
+        latest = res.get("latest_version", CURRENT_VERSION)
+        notes = (res.get("release_notes") or "").strip()
+        download_url = res.get("download_url", "")
+        setup_url = res.get("setup_asset_url", "")
+        setup_size = res.get("setup_asset_size", 0)
+        comp_updates = res.get("component_updates", [])
+
+        # 2. Check App version update on GitHub
+        if has_app:
+            if not is_packaged():
+                # Dev mode (start.bat) -> Developer is already on working source code
+                msg_box = QMessageBox(self)
+                msg_box.setIcon(QMessageBox.Icon.Information)
+                msg_box.setWindowTitle("Môi trường phát triển (Dev Mode)")
+                notes_preview = f"\n\nĐiểm mới trong bản v{latest}:\n{notes}" if notes else ""
+                msg_box.setText(
+                    f"Bạn đang chạy trực tiếp từ mã nguồn phát triển (start.bat — v{CURRENT_VERSION}).\n\n"
+                    f"Mã nguồn trên máy bạn là phiên bản làm việc cục bộ mới nhất.\n"
+                    f"(Bản release đóng gói trên GitHub hiện là: v{latest}){notes_preview}"
+                )
+                btn_test_dl = msg_box.addButton("Tải thử nghiệm bản cài", QMessageBox.ButtonRole.ActionRole)
+                btn_gh = msg_box.addButton("Xem trên GitHub", QMessageBox.ButtonRole.ActionRole)
+                msg_box.addButton("Đóng", QMessageBox.ButtonRole.RejectRole)
+                msg_box.exec()
+
+                if msg_box.clickedButton() == btn_test_dl:
+                    self._start_app_update_flow(latest, download_url, setup_url, setup_size)
+                elif msg_box.clickedButton() == btn_gh:
+                    QDesktopServices.openUrl(QUrl(download_url or "https://github.com/Lurz0205/DubStudiobyHTB/releases"))
+                return
+
+            # Packaged user mode -> Offer 1-click automatic update with live progress
+            msg_box = QMessageBox(self)
+            msg_box.setIcon(QMessageBox.Icon.Information)
+            msg_box.setWindowTitle("Đã có bản cập nhật mới!")
+            notes_text = f"\n\nNội dung bản vá:\n{notes}" if notes else "\n\nBản cập nhật bao gồm các bản sửa lỗi và cải tiến hiệu năng mới nhất."
+            msg_box.setText(
+                f"🎉 Đã có phiên bản mới: v{latest} trên GitHub!\n"
+                f"(Phiên bản bạn đang dùng: v{CURRENT_VERSION}){notes_text}\n\n"
+                "Bạn có muốn tự động tải và cập nhật ngay bây giờ không?"
+            )
+            btn_update = msg_box.addButton("Cập nhật ngay (Tự động)", QMessageBox.ButtonRole.AcceptRole)
+            btn_gh = msg_box.addButton("Xem trên GitHub", QMessageBox.ButtonRole.ActionRole)
+            msg_box.addButton("Để sau", QMessageBox.ButtonRole.RejectRole)
+            msg_box.exec()
+
+            if msg_box.clickedButton() == btn_update:
+                self._start_app_update_flow(latest, download_url, setup_url, setup_size)
+            elif msg_box.clickedButton() == btn_gh:
+                QDesktopServices.openUrl(QUrl(download_url or "https://github.com/Lurz0205/DubStudiobyHTB/releases"))
+            return
+
+        # 3. Check modular component updates
         if comp_updates:
             from ui.dialogs.component_update_dialog import ComponentUpdateDialog
             up_dlg = ComponentUpdateDialog(comp_updates[0], parent=self)
@@ -507,7 +553,7 @@ class MainWindow(QMainWindow):
                     QTimer.singleShot(250, lambda pid=pkg_id: self._settings_page._trigger_download_by_pkg_id(pid))
             return
 
-        # 3. Check readiness of active models selected in Settings
+        # 4. Check readiness of active models selected in Settings
         all_ready, info, missing = self._get_active_models_status()
         if not all_ready:
             msg = (
@@ -530,7 +576,7 @@ class MainWindow(QMainWindow):
                     QTimer.singleShot(250, lambda pid=target_pkg: self._settings_page._trigger_download_by_pkg_id(pid))
             return
 
-        # 4. Everything is up to date and all selected models are ready
+        # 5. Everything is up to date and all selected models are ready
         asr_info = f"{info['asr_name']} (Đã sẵn sàng)"
         sep_info = f"{info['sep_name']} (Đã sẵn sàng)"
         tts_info = "VieNeu-TTS v3 (Đã sẵn sàng)"
@@ -539,7 +585,7 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self,
             "Kiểm tra cập nhật",
-            f"Bạn đang sử dụng phiên bản mới nhất (v{CURRENT_VERSION})!\n\n"
+            f"✓ Bạn đang sử dụng phiên bản mới nhất (v{CURRENT_VERSION})!\n\n"
             f"Trạng thái mô hình & thư viện AI đang sử dụng:\n"
             f"  • Nhận diện giọng nói: {asr_info}\n"
             f"  • Tách nhạc nền & thoại: {sep_info}\n"
@@ -548,6 +594,98 @@ class MainWindow(QMainWindow):
             f"  • Công cụ kết xuất: {ffmpeg_info}\n\n"
             f"Toàn bộ tài nguyên đã sẵn sàng hoạt động.",
         )
+
+    def _start_app_update_flow(
+        self,
+        latest: str,
+        fallback_url: str,
+        setup_url: str = "",
+        setup_size: int = 0,
+    ):
+        """Show clear live progress and prompt for restart upon completion."""
+        from PyQt6.QtWidgets import QProgressDialog, QMessageBox, QApplication
+        from PyQt6.QtCore import Qt
+        from ui.workers import AppUpdateWorker
+        import os
+        import sys
+        import subprocess
+
+        progress_dlg = QProgressDialog("Đang chuẩn bị cập nhật...", "Hủy", 0, 100, self)
+        progress_dlg.setWindowTitle(f"Cập nhật DubStudio v{latest}")
+        progress_dlg.setWindowModality(Qt.WindowModality.WindowModal)
+        progress_dlg.setMinimumDuration(0)
+        progress_dlg.setValue(5)
+        progress_dlg.setAutoClose(False)
+        progress_dlg.setAutoReset(False)
+        progress_dlg.show()
+
+        worker = AppUpdateWorker(setup_url=setup_url, setup_size=setup_size)
+
+        def _on_progress(pct: int, msg: str):
+            progress_dlg.setValue(pct)
+            progress_dlg.setLabelText(msg)
+
+        def _on_finished(result):
+            progress_dlg.close()
+            msg_box = QMessageBox(self)
+            msg_box.setIcon(QMessageBox.Icon.Information)
+            msg_box.setWindowTitle("Cập nhật hoàn tất")
+            msg_box.setText(
+                f"🎉 Bản cập nhật DubStudio v{latest} đã được tải và cài đặt thành công!\n\n"
+                "Bạn có muốn khởi động lại ứng dụng ngay bây giờ để áp dụng bản cập nhật không?"
+            )
+            btn_restart = msg_box.addButton("Khởi động lại ngay", QMessageBox.ButtonRole.AcceptRole)
+            btn_later = msg_box.addButton("Để sau (áp dụng khi mở lại)", QMessageBox.ButtonRole.RejectRole)
+            msg_box.exec()
+
+            if msg_box.clickedButton() == btn_restart:
+                installer = result.get("installer_path") if result else None
+                mgr = result.get("mgr") if result else None
+                info = result.get("info") if result else None
+                if mgr and info:
+                    mgr.apply_updates_and_restart(info)
+                elif installer:
+                    subprocess.Popen(
+                        [installer],
+                        creationflags=getattr(subprocess, "DETACHED_PROCESS", 0),
+                    )
+                    app_inst = QApplication.instance()
+                    if app_inst:
+                        app_inst.quit()
+                    os._exit(0)
+                else:
+                    subprocess.Popen([sys.executable])
+                    app_inst = QApplication.instance()
+                    if app_inst:
+                        app_inst.quit()
+                    os._exit(0)
+            else:
+                mgr = result.get("mgr") if result else None
+                info = result.get("info") if result else None
+                if mgr and info:
+                    mgr.wait_exit_then_apply_updates(info)
+
+        def _on_error(err: str):
+            progress_dlg.close()
+            msg_box = QMessageBox(self)
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+            msg_box.setWindowTitle("Lỗi cập nhật tự động")
+            msg_box.setText(
+                f"Không thể tự động áp dụng bản cập nhật:\n{err}\n\n"
+                "Bạn có muốn mở trang phát hành GitHub để tải bộ cài đặt mới nhất không?"
+            )
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if msg_box.exec() == QMessageBox.StandardButton.Yes:
+                from PyQt6.QtCore import QUrl
+                from PyQt6.QtGui import QDesktopServices
+                QDesktopServices.openUrl(QUrl(fallback_url or "https://github.com/Lurz0205/DubStudiobyHTB/releases"))
+
+        progress_dlg.canceled.connect(worker.requestInterruption)
+        worker.progress.connect(_on_progress)
+        worker.finished.connect(_on_finished)
+        worker.error.connect(_on_error)
+        self._app_update_worker = worker
+        worker.start()
 
     def _start_startup_update_check(self):
         """Run startup scan for updates and missing components in background."""
