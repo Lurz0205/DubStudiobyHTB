@@ -584,15 +584,28 @@ async def _async_send_prompt_to_gemini(prompt: str, port: int = 9222, timeout: f
                     }
                 }
 
-                const panels = document.querySelectorAll('.markdown-main-panel');
-                const lastEl = panels.length > 0 ? panels[panels.length - 1] : null;
-                const text = lastEl ? (lastEl.textContent || lastEl.innerText || "") : "";
+                let targetText = "";
+                const pres = document.querySelectorAll('pre');
+                for (let i = pres.length - 1; i >= 0; i--) {
+                    const t = (pres[i].innerText || pres[i].textContent || "").trim();
+                    if (t.includes('"translations"') || t.includes('"vi"')) {
+                        targetText = t;
+                        break;
+                    }
+                }
+
+                const panels = document.querySelectorAll('.markdown-main-panel, message-content, model-response');
+                if (!targetText && panels.length > 0) {
+                    const lastEl = panels[panels.length - 1];
+                    targetText = lastEl ? (lastEl.textContent || lastEl.innerText || "") : "";
+                }
+
                 return {
                     panel_count: panels.length,
                     is_generating: isGenerating,
                     has_retry: hasRetry,
                     alert_msg: alertMsg,
-                    last_text: text.trim()
+                    last_text: targetText.trim()
                 };
             })()
             """
@@ -607,7 +620,8 @@ async def _async_send_prompt_to_gemini(prompt: str, port: int = 9222, timeout: f
             generating = status.get("is_generating", False)
             text = status.get("last_text", "").strip()
 
-            if count > initial_count and text:
+            has_json_structure = ('"translations"' in text or '"vi"' in text)
+            if (count > initial_count or has_json_structure) and text:
                 # Detect if response was aborted with "Bạn đã dừng câu trả lời này"
                 if "bạn đã dừng câu trả lời này" in text.lower() or "you stopped this response" in text.lower():
                     raise DubError("Gemini Web bị gián đoạn ('Bạn đã dừng câu trả lời này'). Vui lòng bấm Dịch lại.")
@@ -621,7 +635,7 @@ async def _async_send_prompt_to_gemini(prompt: str, port: int = 9222, timeout: f
 
                 if text == last_text:
                     stable_ticks += 1
-                    if stable_ticks >= 5:  # Content stable for ~4s
+                    if stable_ticks >= 4:  # Content stable for ~3.2s
                         return text
                 else:
                     stable_ticks = 0
