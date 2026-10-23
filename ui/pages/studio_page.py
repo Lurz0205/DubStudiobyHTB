@@ -1183,6 +1183,31 @@ class StudioPage(QWidget):
             )
             return
 
+        # Check if segments exist before running dub-only
+        if dub_only:
+            seg_file = ws_dir / "segments.json"
+            has_segs = False
+            if seg_file.exists():
+                try:
+                    import json
+                    segs = json.loads(seg_file.read_text(encoding="utf-8"))
+                    if isinstance(segs, list) and len(segs) > 0:
+                        has_segs = True
+                except Exception:
+                    pass
+            if not has_segs and hasattr(self, "_sub_editor") and getattr(self._sub_editor, "rowCount", None):
+                if self._sub_editor.rowCount() > 0:
+                    has_segs = True
+
+            if not has_segs:
+                QMessageBox.warning(
+                    self,
+                    "Chưa có phụ đề để lồng tiếng",
+                    "Dự án này chưa có dữ liệu phụ đề tiếng Việt.\n\n"
+                    "👉 Vui lòng bấm '1. Tạo phụ đề' để hoàn tất nhận dạng giọng và dịch trước khi bấm tạo lồng tiếng!",
+                )
+                return
+
         self._video_player.unload()
 
         if subtitles_only:
@@ -1257,6 +1282,12 @@ class StudioPage(QWidget):
                 self._btn_create_dub.setEnabled(True)
             self._progress_bar.setVisible(False)
             self._lbl_status.setVisible(False)
+
+            # Restore video player & subtitles in UI so preview is never lost
+            try:
+                self._load_current_job()
+            except Exception:
+                pass
             err_lower = str(err).lower()
             if any(k in err_lower for k in ("dịch", "translate", "gemini", "api", "cdp", "từ điển")):
                 QMessageBox.warning(

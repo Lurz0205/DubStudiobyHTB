@@ -305,6 +305,14 @@ def run(
                 console.print(f"\n[bold green]🎉 Tạo và dịch phụ đề hoàn tất! Bạn có thể kiểm tra, tìm kiếm/thay thế trên bảng trước khi bấm tạo giọng lồng tiếng.[/bold green]")
                 return
         # In dub-only mode, we directly preserve the exact segment voices edited by the user on the table.
+        if dub_only:
+            seg_file = job.workspace / "segments.json"
+            if not seg_file.exists():
+                raise DubError(
+                    "FILE_NOT_FOUND",
+                    "Chưa có tệp dữ liệu phụ đề segments.json để tạo lồng tiếng.",
+                    hint="Vui lòng chạy bước '1. Tạo phụ đề' trước khi tạo lồng tiếng.",
+                )
 
         # 9. TTS (VieNeu-TTS) - Heavy GPU stage
         _run_stage_subprocess("tts", video_path, job_id)

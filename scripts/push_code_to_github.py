@@ -120,7 +120,7 @@ else:
 
 # 6. Create commit
 commit_payload = {
-    "message": "Fix(asr, diagnostics): Verify component readiness and prevent parallel download race conditions",
+    "message": "Docs & Fix: Update README for v1.1.0 and add pre-flight gate for dubbing without subtitles",
     "tree": new_tree_sha,
     "parents": [parent_commit_sha],
 }
