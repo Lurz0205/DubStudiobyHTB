@@ -142,6 +142,28 @@ jobs:
             --noPortable `
             --outputDir "dist\releases"
 
+      - name: Clean Conflicting Remote Assets
+        shell: pwsh
+        run: |
+          $tag = "$env:TAG"
+          $headers = @{
+            "Authorization" = "token ${{ secrets.GITHUB_TOKEN }}"
+            "Accept" = "application/vnd.github.v3+json"
+            "User-Agent" = "GitHub-Actions-Velopack"
+          }
+          try {
+            $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" -Headers $headers
+            if ($rel -and $rel.assets) {
+              foreach ($asset in $rel.assets) {
+                Write-Host "Deleting conflicting asset: $($asset.name) (ID: $($asset.id))..."
+                Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/${{ github.repository }}/releases/assets/$($asset.id)" -Headers $headers
+              }
+              Write-Host "All conflicting assets removed successfully."
+            }
+          } catch {
+            Write-Host "Release $tag does not exist or has no conflicting assets."
+          }
+
       - name: Upload Packages to GitHub Release
         shell: pwsh
         run: |
