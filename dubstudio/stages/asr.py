@@ -76,23 +76,20 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
                 "max_end_silence_time": 400,
                 "speech_noise_thres": 0.6,
             }
-            if model_dir:
-                asr_model = AutoModel(
-                    model=str(model_dir.resolve()),
-                    vad_model="fsmn-vad",
-                    vad_kwargs=vad_kwargs,
-                    device=device if device == "cpu" else "cuda:0",
-                    disable_update=True,
+            if not model_dir:
+                raise DubError(
+                    code="MODEL_NOT_FOUND",
+                    user_message_vi="Không tìm thấy mô hình SenseVoiceSmall cục bộ trên máy.",
+                    hint_vi="Vui lòng đặt thư mục SenseVoiceSmall vào thư mục models/ hoặc kiểm tra lại đường dẫn trong Cài đặt.",
                 )
-            else:
-                asr_model = AutoModel(
-                    model="iic/SenseVoiceSmall",
-                    hub="ms",
-                    vad_model="fsmn-vad",
-                    vad_kwargs=vad_kwargs,
-                    device=device if device == "cpu" else "cuda:0",
-                    disable_update=True,
-                )
+
+            asr_model = AutoModel(
+                model=str(model_dir.resolve()),
+                vad_model="fsmn-vad",
+                vad_kwargs=vad_kwargs,
+                device=device if device == "cpu" else "cuda:0",
+                disable_update=True,
+            )
 
             emit_event(stage_name, 40.0, "Đang bóc tách phân đoạn thoại tiếng Trung qua SenseVoice...")
             res = asr_model.generate(
@@ -152,15 +149,42 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
 
         else:
             from faster_whisper import WhisperModel
-
             from dubstudio.paths import get_models_dir
+            models_root = get_models_dir()
+            model_size = cfg.asr.model_size
+            local_candidates = [
+                models_root / f"models--Systran--faster-whisper-{model_size}",
+                models_root / f"faster-whisper-{model_size}",
+                models_root / model_size,
+                Path(f"models/models--Systran--faster-whisper-{model_size}"),
+                Path(f"models/{model_size}"),
+            ]
+            whisper_target = cfg.asr.model_size
+            for cand in local_candidates:
+                if cand.exists() and cand.is_dir():
+                    try:
+                        if any(cand.iterdir()):
+                            whisper_target = str(cand.resolve())
+                            break
+                    except Exception:
+                        pass
+
             emit_event(stage_name, 10.0, f"Khởi tạo faster-whisper ({device})...")
-            model = WhisperModel(
-                cfg.asr.model_size,
-                device=device,
-                compute_type=compute_type,
-                download_root=str(get_models_dir().resolve()),
-            )
+            try:
+                model = WhisperModel(
+                    whisper_target,
+                    device=device,
+                    compute_type=compute_type,
+                    download_root=str(models_root.resolve()),
+                    local_files_only=True,
+                )
+            except Exception as ex:
+                raise DubError(
+                    code="MODEL_NOT_FOUND",
+                    user_message_vi=f"Không tìm thấy mô hình faster-whisper '{model_size}' cục bộ trên máy.",
+                    hint_vi="Vui lòng kiểm tra lại thư mục models/ hoặc đường dẫn mô hình.",
+                    details={"error": str(ex)},
+                ) from ex
 
             emit_event(stage_name, 40.0, "Đang trích xuất phụ đề tiếng Trung với word timestamps...")
             segments_gen, info = model.transcribe(
