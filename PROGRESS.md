@@ -14,13 +14,14 @@
   - Nâng cấp nút "Kiểm tra cập nhật": kiểm tra GitHub release, kiểm tra gói cập nhật, và xác thực trực tiếp xem các mô hình đang chọn làm việc trong Cài đặt (ASR, tách nhạc, TTS) đã tải chưa. Cảnh báo và chuyển hướng 1-click vào Cài đặt nếu thiếu.
   - Hỗ trợ tải tự động trọn gói cho `whisper_large_v3` & `sensevoice_small` qua HuggingFace Hub snapshot.
   - 140/140 unit tests pass 100% (`pytest tests/ -q`). Rebuild `dist\DubStudio\DubStudio.exe` hoàn tất, selftest code 0 (Commit `eb21870`).
-- **Giai đoạn 4 (Đồng bộ Bản vá Thực tế & Đại trùng tu Giao diện Cinema Dark Studio):**
-  - Đồng bộ và bảo vệ 100% bản vá thực tế của chủ dự án, mở rộng guard chặn tải ngầm ở cả `separate` (`DubError("MODEL_NOT_FOUND")`).
-  - Đại trùng tu toàn diện giao diện "Cinema Dark Studio" (`ui/theme.py`): chuẩn màu `#0B0D13`, `#11141D`, `#171B26`, Accent Indigo `#6366F1`, Emerald `#10B981`, viền mảnh `#262C3A`, bo góc 10px, typography Segoe UI Variable / Inter.
-  - Nâng cấp bảng `SubtitleEditor`: hàng 38px chuẩn tiếng Việt, kẻ ngang siêu mảnh, màu xen kẽ, highlight dòng đang phát.
-  - Nâng cấp `VideoPlayerWidget`: khung video đen tuyền `#000000`, controls bar dạng Card studio đồng bộ.
-  - Benchmark chuyển tab đạt hiệu năng cao (< 35 ms, 0% CPU khi nghỉ).
-  - 143/143 unit tests pass 100% (`pytest tests/ -q`). Rebuild `dist\DubStudio\DubStudio.exe`, selftest code 0 (Commit `9b7c14d`).
+- **Giai đoạn 4 & Bản phát hành v1.1.0 (Beta Release):**
+  - Khắc phục triệt để `[WinError 10013]` qua `WindowsSelectorEventLoopPolicy`, chặn lỗi socketpair của Proactor loop.
+  - Quét mô hình chọn lọc: chỉ bắt tải ASR đang cấu hình làm việc, tự động nhắc khi đổi mô hình; quét toàn diện Torch, VieNeu, FFmpeg.
+  - Tải streaming 256KB trực tiếp vào thư mục tạm `.staging_*`, hủy tức thì <0.1s, dọn sạch rác khi tắt/mở app.
+  - Chống lỗi `RuntimeError: QProgressBar deleted` khi bấm làm mới, cập nhật tại chỗ (*in-place*).
+  - Tự động chuyển tab Cài đặt và kích hoạt tải ngay khi bấm "✓ Tải ngay" trên popup cập nhật.
+  - Nâng cấp phiên bản lên `v1.1.0`, kiểm toán máy khách sạch qua `sim_user_machine.ps1` (Code 0, Selftest OK).
+  - Đạt 145/145 unit tests passed (100%). Sẵn sàng đẩy GitHub Actions Azure đóng gói Velopack phát hành Release.
 
 ## Tiếp theo (Next)
-- Người dùng kiểm tra trực tiếp trên bản build mới nhất `dist\DubStudio\DubStudio.exe`.
+- Theo dõi GitHub Actions Azure tự động đóng gói `DubStudio-win-Setup.exe` và gắn Release `v1.1.0`.

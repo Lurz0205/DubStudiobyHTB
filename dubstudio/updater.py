@@ -13,7 +13,7 @@ from dubstudio.components import check_for_component_updates
 from dubstudio.packaging import is_packaged, get_user_data_dir
 
 GITHUB_REPO = "Lurz0205/DubStudiobyHTB"
-CURRENT_VERSION = "1.0.1"
+CURRENT_VERSION = "1.1.0"
 
 
 def check_github_releases(timeout: float = 5.0) -> Optional[Dict[str, Any]]:
@@ -63,9 +63,27 @@ def check_all_updates() -> Dict[str, Any]:
         result["component_updates"] = comp_updates or []
 
         manifest = fetch_components_manifest()
+        # Determine currently selected ASR model from config / env
+        import os
+        from dubstudio.config import AppConfig
+        try:
+            cfg = AppConfig.load()
+            chosen_asr = os.getenv("WHISPER_MODEL", "") or os.getenv("ASR_MODEL", "") or cfg.asr.model_size or "sensevoice-small"
+        except Exception:
+            chosen_asr = "sensevoice-small"
+
+        active_asr_pkg = "sensevoice_small" if "sensevoice" in str(chosen_asr).lower() else "whisper_large_v3"
+
         for pkg in manifest.get("packages", []):
-            if pkg.get("required"):
-                ready, _ = is_component_ready(pkg["id"])
+            pkg_id = pkg["id"]
+            # ASR packages: ONLY require the one actively chosen for work
+            if pkg.get("category") == "asr":
+                if pkg_id == active_asr_pkg:
+                    ready, _ = is_component_ready(pkg_id)
+                    if not ready:
+                        result["missing_components"].append(pkg)
+            elif pkg.get("category") in ("separate", "tts", "runtime") or pkg.get("required"):
+                ready, _ = is_component_ready(pkg_id)
                 if not ready:
                     result["missing_components"].append(pkg)
     except Exception:

@@ -79,3 +79,48 @@ def test_components_physical_verification_and_sync(monkeypatch, tmp_path):
     synced = sync_installed_components()
     assert "whisper_large_v3" not in synced
 
+
+def test_selective_asr_checking(monkeypatch):
+    """Verify check_all_updates only requires the actively selected ASR model."""
+    from dubstudio.updater import check_all_updates
+
+    # Case 1: SenseVoice is active
+    monkeypatch.setenv("WHISPER_MODEL", "sensevoice-small")
+    monkeypatch.setenv("ASR_MODEL", "sensevoice-small")
+    res1 = check_all_updates()
+    missing_ids_1 = [p["id"] for p in res1.get("missing_components", [])]
+    assert "whisper_large_v3" not in missing_ids_1
+
+    # Case 2: Whisper is active
+    monkeypatch.setenv("WHISPER_MODEL", "large-v3")
+    monkeypatch.setenv("ASR_MODEL", "large-v3")
+    res2 = check_all_updates()
+    missing_ids_2 = [p["id"] for p in res2.get("missing_components", [])]
+    assert "sensevoice_small" not in missing_ids_2
+
+
+def test_cleanup_dangling_staging_files(tmp_path, monkeypatch):
+    """Verify cleanup_dangling_staging_files removes leftover .staging_* folders and .part files."""
+    from dubstudio.components import cleanup_dangling_staging_files
+
+    fake_models = tmp_path / "models"
+    fake_user_data = tmp_path / "user_data"
+    fake_models.mkdir()
+    fake_user_data.mkdir()
+
+    staging_dir = fake_models / ".staging_test_123"
+    staging_dir.mkdir()
+    (staging_dir / "partial.bin").write_bytes(b"temp")
+
+    part_file = fake_user_data / "model.pt.part"
+    part_file.write_bytes(b"part_data")
+
+    monkeypatch.setattr("dubstudio.paths.get_models_dir", lambda: fake_models)
+    monkeypatch.setattr("dubstudio.paths.get_user_data_dir", lambda: fake_user_data)
+
+    cleanup_dangling_staging_files()
+
+    assert not staging_dir.exists()
+    assert not part_file.exists()
+
+

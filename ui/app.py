@@ -32,17 +32,27 @@ class IgnoreWheelFilter(QObject):
         return super().eventFilter(obj, event)
 
 
-def find_available_port(start_port: int = 8765) -> int:
-    """Find an available localhost port, testing socket binding with SO_REUSEADDR."""
-    for p in range(start_port, start_port + 20):
+def find_available_port(start_port: int = 8765, max_attempts: int = 30) -> int:
+    """Find an available localhost port, testing socket binding with SO_EXCLUSIVEADDRUSE on Windows."""
+    for p in range(start_port, start_port + max_attempts):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
-                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                    try:
+                        s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                    except OSError:
+                        pass
                 s.bind(("127.0.0.1", p))
                 return p
             except OSError:
                 continue
-    return start_port
+    # Fallback to ephemeral port assigned by Windows kernel
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            return s.getsockname()[1]
+    except OSError:
+        return start_port
 
 
 def is_api_healthy(port: int = 8765) -> bool:
@@ -111,11 +121,25 @@ def main():
 
     print("[DubStudio] Starting application...")
 
-    # Choose available port dynamically (fallback from 8765 if blocked)
+    # Clean up any leftover staging/part files from previous interrupted downloads
+    try:
+        from dubstudio.components import cleanup_dangling_staging_files
+        cleanup_dangling_staging_files()
+    except Exception as e:
+        print(f"[DubStudio] Staging cleanup notice: {e}")
+
+    # Set WindowsSelectorEventLoopPolicy on Windows to prevent ProactorEventLoop WinError 10013 socketpair crash
+    if sys.platform == "win32":
+        import asyncio
+        try:
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        except Exception:
+            pass
+
+    # Start FastAPI server thread (with automatic port conflict fallback)
     port = find_available_port(8765)
     os.environ["DUBSTUDIO_API_PORT"] = str(port)
 
-    # 1. Start FastAPI server thread if not already healthy
     if not is_api_healthy(port):
         print(f"[DubStudio] Starting background API service (FastAPI) on port {port}...")
         cfg = uvicorn.Config(
@@ -128,20 +152,16 @@ def main():
         )
         def _run_server():
             import asyncio
-            loop = None
+            if sys.platform == "win32":
+                try:
+                    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+                except Exception:
+                    pass
             try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
                 srv = uvicorn.Server(cfg)
-                loop.run_until_complete(srv.serve())
+                srv.run()
             except Exception as e:
                 print(f"[DubStudio] Background API notice: {e}")
-            finally:
-                if loop and not loop.is_closed():
-                    try:
-                        loop.close()
-                    except Exception:
-                        pass
 
         server_thread = threading.Thread(target=_run_server, daemon=True)
         server_thread.start()
@@ -208,7 +228,15 @@ def main():
                 updates = check_for_component_updates()
                 if updates:
                     up_dlg = ComponentUpdateDialog(updates[0], parent=win)
-                    up_dlg.exec()
+                    dlg_res = up_dlg.exec()
+                    if dlg_res == 1 or getattr(up_dlg, "user_agreed", False):
+                        win._btn_settings.setChecked(True)
+                        win._on_nav_clicked(4)
+                        pkg = updates[0].get("package", {})
+                        pkg_id = pkg.get("id")
+                        if pkg_id and hasattr(win, "_settings_page"):
+                            from PyQt6.QtCore import QTimer
+                            QTimer.singleShot(250, lambda pid=pkg_id: win._settings_page._trigger_download_by_pkg_id(pid))
             except Exception:
                 pass
         QTimer.singleShot(2000, _check_bg_status)

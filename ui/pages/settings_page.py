@@ -237,6 +237,7 @@ class SettingsPage(QWidget):
         self._combo_asr_model.addItem("SenseVoice-Small (Tốc độ siêu nhanh — Khuyên dùng cho video dài)", "sensevoice-small")
         self._combo_asr_model.addItem("faster-whisper large-v3 (Độ chính xác cao — Phù hợp âm thanh nhiều tạp âm)", "large-v3")
         self._combo_asr_model.setFixedHeight(30)
+        self._combo_asr_model.activated.connect(self._on_asr_model_user_selected)
         asr_form.addWidget(self._combo_asr_model)
 
         lbl_asr_hint = QLabel(
@@ -262,6 +263,7 @@ class SettingsPage(QWidget):
         self._combo_sep_model.addItem("Kim Vocal 2 (Tốc độ nhanh, nhẹ — Phù hợp đa số cấu hình)", "Kim_Vocal_2.onnx")
         self._combo_sep_model.addItem("BS-RoFormer EP 317 (Chất lượng cao — Tách âm sạch nhất, cần GPU rời)", "model_bs_roformer_ep_317_sdr_12.9755.ckpt")
         self._combo_sep_model.setFixedHeight(30)
+        self._combo_sep_model.activated.connect(self._on_sep_model_user_selected)
         sep_form.addWidget(self._combo_sep_model)
 
         lbl_sep_hint = QLabel(
@@ -692,10 +694,38 @@ class SettingsPage(QWidget):
     def _refresh_components_ui(self):
         """Build or refresh UI cards for all AI models and packages from components.json."""
         import json
-        from dubstudio.paths import get_app_dir
+        from dubstudio.paths import get_resource_dir, get_app_dir
         from dubstudio.components import is_component_ready
 
-        # Clear existing row widgets
+        if not hasattr(self, "_active_downloading_pkgs"):
+            self._active_downloading_pkgs = set()
+
+        # If cards already exist, perform an in-place update to preserve C++ objects and active downloads!
+        if hasattr(self, "_pkg_ui_map") and self._pkg_ui_map and self._comp_rows_layout.count() > 0:
+            for pkg_id, entry in self._pkg_ui_map.items():
+                if pkg_id in self._active_downloading_pkgs:
+                    continue  # Keep downloading progress bar and cancel button untouched!
+                ready, status_text = is_component_ready(pkg_id)
+                try:
+                    badge = entry.get("badge")
+                    btn = entry.get("btn")
+                    if badge:
+                        if ready:
+                            badge.setText("🟢 Đã sẵn sàng")
+                            badge.setStyleSheet("color: #34d399; font-weight: 600; font-size: 11.5px;")
+                        else:
+                            badge.setText("🟡 Chưa tải")
+                            badge.setStyleSheet("color: #fbbf24; font-weight: 600; font-size: 11.5px;")
+                    if btn:
+                        btn.setText(" Tải lại" if ready else " Tải gói này")
+                        btn.setObjectName("secondary" if ready else "primary")
+                        btn.style().unpolish(btn)
+                        btn.style().polish(btn)
+                except (RuntimeError, AttributeError):
+                    pass
+            return
+
+        # Clear existing row widgets only when initial creation or empty
         while self._comp_rows_layout.count():
             item = self._comp_rows_layout.takeAt(0)
             w = item.widget()
@@ -717,6 +747,10 @@ class SettingsPage(QWidget):
                 packages = data.get("packages", [])
             except Exception:
                 pass
+
+        if not hasattr(self, "_pkg_ui_map"):
+            self._pkg_ui_map = {}
+        self._pkg_ui_map.clear()
 
         if not packages:
             lbl_empty = QLabel("Không thể nạp danh mục gói thành phần.")
@@ -791,22 +825,97 @@ class SettingsPage(QWidget):
             )
             c_layout.addWidget(pbar)
 
+            self._pkg_ui_map[pkg_id] = {
+                "pkg": pkg,
+                "btn": btn_action,
+                "btn_cancel": btn_cancel,
+                "pbar": pbar,
+                "badge": status_badge,
+            }
+
             btn_action.clicked.connect(lambda _, p=pkg, b=btn_action, bc=btn_cancel, pb=pbar, sb=status_badge: self._download_component(p, b, bc, pb, sb))
             self._comp_rows_layout.addWidget(card)
+
+    def _update_app_status(self, msg: str):
+        """Forward real-time status message to the MainWindow bottom status bar."""
+        try:
+            win = self.window()
+            if hasattr(win, "status_bar") and win.status_bar:
+                win.status_bar.showMessage(msg)
+        except Exception:
+            pass
+
+    def _trigger_download_by_pkg_id(self, pkg_id: str):
+        """Programmatically trigger download for a component by pkg_id with full UI synchronization."""
+        entry = getattr(self, "_pkg_ui_map", {}).get(pkg_id)
+        if entry:
+            self._download_component(
+                entry["pkg"],
+                entry["btn"],
+                entry["btn_cancel"],
+                entry["pbar"],
+                entry["badge"]
+            )
+
+    def _on_asr_model_user_selected(self, idx: int):
+        """Prompt and offer instant download when user interactively selects a model that is not yet ready."""
+        val = self._combo_asr_model.currentData()
+        pkg_id = "sensevoice_small" if "sensevoice" in str(val).lower() else "whisper_large_v3"
+        pkg_name = "SenseVoice-Small" if pkg_id == "sensevoice_small" else "faster-whisper large-v3"
+        from dubstudio.components import is_component_ready
+        ready, _ = is_component_ready(pkg_id)
+        if not ready:
+            reply = QMessageBox.question(
+                self,
+                "Chưa tải mô hình",
+                f"Mô hình nhận diện giọng nói '{pkg_name}' bạn vừa chọn chưa được tải về máy.\n\n"
+                f"Bạn có muốn tải gói này ngay bây giờ không?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._trigger_download_by_pkg_id(pkg_id)
+
+    def _on_sep_model_user_selected(self, idx: int):
+        """Prompt and offer instant download when user interactively selects a separation model that is not yet ready."""
+        val = self._combo_sep_model.currentData()
+        pkg_id = "bs_roformer" if "roformer" in str(val).lower() else "kim_vocal_2"
+        pkg_name = "BS-RoFormer EP 317" if pkg_id == "bs_roformer" else "Kim Vocal 2"
+        from dubstudio.components import is_component_ready
+        ready, _ = is_component_ready(pkg_id)
+        if not ready:
+            reply = QMessageBox.question(
+                self,
+                "Chưa tải mô hình",
+                f"Mô hình tách nhạc '{pkg_name}' bạn vừa chọn chưa được tải về máy.\n\n"
+                f"Bạn có muốn tải gói này ngay bây giờ không?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._trigger_download_by_pkg_id(pkg_id)
 
     def _download_component(self, pkg: dict, btn: QPushButton, btn_cancel: QPushButton, pbar: QProgressBar, status_badge: QLabel):
         """Launch background worker to download and install a component package with progress and cancel support."""
         from ui.workers import DownloadComponentWorker
 
-        btn.setVisible(False)
-        btn_cancel.setVisible(True)
-        btn_cancel.setEnabled(True)
-        btn_cancel.setText(" Hủy")
+        if not hasattr(self, "_active_downloading_pkgs"):
+            self._active_downloading_pkgs = set()
 
-        pbar.setVisible(True)
-        pbar.setValue(0)
-        status_badge.setText("⏳ Đang chuẩn bị tải...")
-        status_badge.setStyleSheet("color: #38bdf8; font-weight: 600; font-size: 11.5px;")
+        pkg_id = pkg.get("id")
+        self._active_downloading_pkgs.add(pkg_id)
+
+        try:
+            btn.setVisible(False)
+            btn_cancel.setVisible(True)
+            btn_cancel.setEnabled(True)
+            btn_cancel.setText(" Hủy")
+
+            pbar.setVisible(True)
+            pbar.setValue(0)
+            status_badge.setText("⏳ Đang chuẩn bị tải...")
+            status_badge.setStyleSheet("color: #38bdf8; font-weight: 600; font-size: 11.5px;")
+        except (RuntimeError, AttributeError):
+            pass
+        self._update_app_status(f"⏳ Đang chuẩn bị tải gói '{pkg.get('name')}'...")
 
         w = DownloadComponentWorker(pkg)
 
@@ -816,59 +925,106 @@ class SettingsPage(QWidget):
             pass
 
         def _on_cancel():
-            btn_cancel.setEnabled(False)
-            btn_cancel.setText(" Đang hủy...")
-            status_badge.setText("⏳ Đang hủy & dọn dẹp file tạm...")
+            self._active_downloading_pkgs.discard(pkg_id)
+            try:
+                btn_cancel.setEnabled(False)
+                btn_cancel.setText(" Đang hủy...")
+                status_badge.setText("⏳ Đang hủy & dọn dẹp file tạm...")
+            except (RuntimeError, AttributeError):
+                pass
+            self._update_app_status(f"⏳ Đang hủy tải gói '{pkg.get('name')}' và dọn dẹp file tạm...")
             w.cancel()
         btn_cancel.clicked.connect(_on_cancel)
 
         def _on_prog(pid, pct, down, tot):
-            pbar.setValue(pct)
+            entry = getattr(self, "_pkg_ui_map", {}).get(pid)
+            cur_pbar = entry.get("pbar") if entry else pbar
+            cur_badge = entry.get("badge") if entry else status_badge
+
             mb_down = down / (1024 * 1024)
             mb_tot = tot / (1024 * 1024)
-            status_badge.setText(f"⏳ {pct}% ({mb_down:.1f}/{mb_tot:.1f} MB)")
+            try:
+                if cur_pbar:
+                    cur_pbar.setValue(pct)
+                if cur_badge:
+                    cur_badge.setText(f"⏳ {pct}% ({mb_down:.1f}/{mb_tot:.1f} MB)")
+            except (RuntimeError, AttributeError):
+                pass
+            self._update_app_status(f"⏳ Đang tải {pkg.get('name')}: {pct}% ({mb_down:.1f}/{mb_tot:.1f} MB)...")
 
         def _on_done(pid, ok, msg):
-            pbar.setVisible(False)
-            btn_cancel.setVisible(False)
-            btn.setVisible(True)
-            btn.setEnabled(True)
+            self._active_downloading_pkgs.discard(pkg_id)
+            entry = getattr(self, "_pkg_ui_map", {}).get(pid)
+            cur_pbar = entry.get("pbar") if entry else pbar
+            cur_badge = entry.get("badge") if entry else status_badge
+            cur_btn = entry.get("btn") if entry else btn
+            cur_cancel = entry.get("btn_cancel") if entry else btn_cancel
+
             from dubstudio.components import is_component_ready
             ready, _ = is_component_ready(pid)
+            try:
+                if cur_pbar:
+                    cur_pbar.setVisible(False)
+                if cur_cancel:
+                    cur_cancel.setVisible(False)
+                if cur_btn:
+                    cur_btn.setVisible(True)
+                    cur_btn.setEnabled(True)
+                    cur_btn.setText(" Tải lại" if (ok or ready) else " Tải gói này")
+                    cur_btn.setObjectName("secondary" if (ok or ready) else "primary")
+                    cur_btn.style().unpolish(cur_btn)
+                    cur_btn.style().polish(cur_btn)
+                if cur_badge:
+                    if ok or ready:
+                        cur_badge.setText("🟢 Đã sẵn sàng")
+                        cur_badge.setStyleSheet("color: #34d399; font-weight: 600; font-size: 11.5px;")
+                    else:
+                        cur_badge.setText("🟡 Chưa tải")
+                        cur_badge.setStyleSheet("color: #fbbf24; font-weight: 600; font-size: 11.5px;")
+            except (RuntimeError, AttributeError):
+                pass
+
             if ok:
-                btn.setText(" Tải lại")
-                btn.setObjectName("secondary")
-                status_badge.setText("🟢 Đã sẵn sàng")
-                status_badge.setStyleSheet("color: #34d399; font-weight: 600; font-size: 11.5px;")
+                self._update_app_status(f"● Đã tải và cài đặt thành công: {pkg.get('name')}.")
                 QMessageBox.information(self, "Tải thành công", msg)
             elif ready:
-                btn.setText(" Tải lại")
-                btn.setObjectName("secondary")
-                status_badge.setText("🟢 Đã sẵn sàng")
-                status_badge.setStyleSheet("color: #34d399; font-weight: 600; font-size: 11.5px;")
+                self._update_app_status(f"● Gói '{pkg.get('name')}' đã sẵn sàng.")
             else:
-                btn.setText(" Tải gói này")
-                btn.setObjectName("primary")
-                status_badge.setText("🟡 Chưa tải")
-                status_badge.setStyleSheet("color: #fbbf24; font-weight: 600; font-size: 11.5px;")
+                self._update_app_status(f"● Đã dừng/hủy tải gói '{pkg.get('name')}'.")
 
         def _on_err(pid, err_msg):
-            pbar.setVisible(False)
-            btn_cancel.setVisible(False)
-            btn.setVisible(True)
-            btn.setEnabled(True)
+            self._active_downloading_pkgs.discard(pkg_id)
+            entry = getattr(self, "_pkg_ui_map", {}).get(pid)
+            cur_pbar = entry.get("pbar") if entry else pbar
+            cur_badge = entry.get("badge") if entry else status_badge
+            cur_btn = entry.get("btn") if entry else btn
+            cur_cancel = entry.get("btn_cancel") if entry else btn_cancel
+
             from dubstudio.components import is_component_ready
             ready, _ = is_component_ready(pid)
-            if ready:
-                btn.setText(" Tải lại")
-                btn.setObjectName("secondary")
-                status_badge.setText("🟢 Đã sẵn sàng")
-                status_badge.setStyleSheet("color: #34d399; font-weight: 600; font-size: 11.5px;")
-            else:
-                btn.setText(" Thử lại")
-                btn.setObjectName("primary")
-                status_badge.setText("❌ Lỗi tải")
-                status_badge.setStyleSheet("color: #ef4444; font-weight: 600; font-size: 11.5px;")
+            try:
+                if cur_pbar:
+                    cur_pbar.setVisible(False)
+                if cur_cancel:
+                    cur_cancel.setVisible(False)
+                if cur_btn:
+                    cur_btn.setVisible(True)
+                    cur_btn.setEnabled(True)
+                    cur_btn.setText(" Tải lại" if ready else " Thử lại")
+                    cur_btn.setObjectName("secondary" if ready else "primary")
+                    cur_btn.style().unpolish(cur_btn)
+                    cur_btn.style().polish(cur_btn)
+                if cur_badge:
+                    if ready:
+                        cur_badge.setText("🟢 Đã sẵn sàng")
+                        cur_badge.setStyleSheet("color: #34d399; font-weight: 600; font-size: 11.5px;")
+                    else:
+                        cur_badge.setText("❌ Lỗi tải")
+                        cur_badge.setStyleSheet("color: #ef4444; font-weight: 600; font-size: 11.5px;")
+            except (RuntimeError, AttributeError):
+                pass
+
+            self._update_app_status(f"❌ Lỗi tải {pkg.get('name')}: {err_msg}")
             QMessageBox.critical(self, "Lỗi tải gói", f"Không thể tải gói '{pkg.get('name')}':\n\n{err_msg}")
 
         w.progress.connect(_on_prog)

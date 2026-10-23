@@ -342,15 +342,12 @@ def is_component_ready(pkg_id: str) -> Tuple[bool, str]:
         ]
         for c in candidates:
             if c.is_dir():
-                has_weights = (
-                    (c / "model.pt").exists()
-                    or (c / "model.onnx").exists()
-                    or (c / "config.yaml").exists()
-                    or any(c.glob("snapshots/*/*model*"))
-                    or any(c.glob("*model*"))
-                )
-                if has_weights:
-                    return True, "Đã sẵn sàng"
+                for target_file in [c / "model.pt", c / "model.onnx"]:
+                    if target_file.is_file() and target_file.stat().st_size > 100 * 1024 * 1024:
+                        return True, "Đã sẵn sàng"
+                for snap in c.glob("snapshots/*/*model*.pt"):
+                    if snap.is_file() and snap.stat().st_size > 100 * 1024 * 1024:
+                        return True, "Đã sẵn sàng"
         return False, "Chưa tải"
 
     if pkg_id == "whisper_large_v3":
@@ -362,14 +359,12 @@ def is_component_ready(pkg_id: str) -> Tuple[bool, str]:
         ]
         for c in candidates:
             if c.is_dir():
-                has_weights = (
-                    (c / "model.bin").exists()
-                    or (c / "model.safetensors").exists()
-                    or any(c.glob("snapshots/*/*model*"))
-                    or any(c.glob("*.bin"))
-                )
-                if has_weights:
-                    return True, "Đã sẵn sàng"
+                for target_file in [c / "model.bin", c / "model.safetensors"]:
+                    if target_file.is_file() and target_file.stat().st_size > 100 * 1024 * 1024:
+                        return True, "Đã sẵn sàng"
+                for snap in c.glob("snapshots/*/*model*"):
+                    if snap.is_file() and snap.stat().st_size > 100 * 1024 * 1024:
+                        return True, "Đã sẵn sàng"
         return False, "Chưa tải"
 
     if pkg_id == "vieneu_tts_voices":
@@ -423,16 +418,14 @@ def download_component_file(
     cancel_flag=None,
 ) -> bool:
     """
-    Download component from URL directly with chunk streaming,
-    verifies checksum, and installs atomically into target_dir.
-    Guarantees no leftover garbage/temporary files on cancel or error.
+    Download component with responsive chunk streaming and instant cancellation.
+    Atomically installs to dest_dir only upon 100% successful verification.
+    Guarantees no leftover garbage or partially-written models on disk.
     """
+    import os
+    import shutil
     import requests
     from dubstudio.paths import get_user_data_dir, get_models_dir
-
-    url = pkg.get("url")
-    if not url:
-        return False
 
     pkg_id = pkg["id"]
     target_rel = pkg.get("target_dir", "models")
@@ -450,125 +443,155 @@ def download_component_file(
 
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    # Specialized multi-file snapshot download for SenseVoice-Small & Whisper-large-v3
+    # Determine download items: list of (rel_filename, url, approx_bytes)
     if pkg_id == "sensevoice_small":
-        try:
-            from huggingface_hub import snapshot_download
-            snapshot_download(
-                "FunAudioLLM/SenseVoiceSmall",
-                local_dir=str(dest_dir.resolve()),
-                local_dir_use_symlinks=False,
-            )
-            installed = get_installed_components()
-            installed[pkg_id] = {
-                "version": int(pkg.get("version", 1)),
-                "path": str(dest_dir.resolve()),
-                "installed_at": time.time(),
-                "status": "ready",
-            }
-            save_installed_components(installed)
-            return True
-        except Exception:
-            pass
+        files_to_get = [
+            ("model.pt", "https://huggingface.co/FunAudioLLM/SenseVoiceSmall/resolve/main/model.pt", 936291369),
+            ("config.yaml", "https://huggingface.co/FunAudioLLM/SenseVoiceSmall/resolve/main/config.yaml", 1855),
+            ("chn_jpn_yue_eng_ko_spectok.bpe.model", "https://huggingface.co/FunAudioLLM/SenseVoiceSmall/resolve/main/chn_jpn_yue_eng_ko_spectok.bpe.model", 377341),
+        ]
+        is_directory_package = True
+    elif pkg_id == "whisper_large_v3":
+        files_to_get = [
+            ("model.bin", "https://huggingface.co/Systran/faster-whisper-large-v3/resolve/main/model.bin", 3240000000),
+            ("config.json", "https://huggingface.co/Systran/faster-whisper-large-v3/resolve/main/config.json", 2400),
+            ("tokenizer.json", "https://huggingface.co/Systran/faster-whisper-large-v3/resolve/main/tokenizer.json", 2400000),
+            ("vocabulary.json", "https://huggingface.co/Systran/faster-whisper-large-v3/resolve/main/vocabulary.json", 1000000),
+        ]
+        is_directory_package = True
+    else:
+        url = pkg.get("url")
+        if not url:
+            return False
+        file_name = url.split("?")[0].split("/")[-1]
+        files_to_get = [(file_name, url, int(pkg.get("size_bytes", 0)))]
+        is_directory_package = False
 
-    if pkg_id == "whisper_large_v3":
-        try:
-            from huggingface_hub import snapshot_download
-            snapshot_download(
-                "Systran/faster-whisper-large-v3",
-                local_dir=str(dest_dir.resolve()),
-                local_dir_use_symlinks=False,
-            )
-            installed = get_installed_components()
-            installed[pkg_id] = {
-                "version": int(pkg.get("version", 1)),
-                "path": str(dest_dir.resolve()),
-                "installed_at": time.time(),
-                "status": "ready",
-            }
-            save_installed_components(installed)
-            return True
-        except Exception:
-            pass
+    # Create temporary isolated staging folder
+    staging_dir = dest_dir.parent / f".staging_{pkg_id}_{os.getpid()}_{int(time.time())}"
+    staging_dir.mkdir(parents=True, exist_ok=True)
 
-    # Determine filename
-    file_name = url.split("?")[0].split("/")[-1]
-    tmp_file = dest_dir / f".download_{pkg_id}_{file_name}.part"
-    final_file = dest_dir / file_name
+    total_bytes_all = sum(item[2] for item in files_to_get)
+    if total_bytes_all <= 0:
+        total_bytes_all = int(pkg.get("size_bytes", 0)) or 1
 
+    overall_downloaded = 0
     was_cancelled = False
+
     try:
         headers = {
-            "User-Agent": "DubStudio-Downloader/1.0.1",
+            "User-Agent": "DubStudio-Downloader/1.1.0",
             "Accept": "*/*",
         }
-        with requests.get(url, stream=True, timeout=60, headers=headers, allow_redirects=True) as resp:
-            resp.raise_for_status()
-            total_size = int(resp.headers.get("content-length", 0))
-            if total_size <= 0:
-                total_size = int(pkg.get("size_bytes", 0))
+        for fname, f_url, approx_len in files_to_get:
+            if cancel_flag and cancel_flag():
+                was_cancelled = True
+                break
 
-            downloaded = 0
-            block_size = 256 * 1024  # 256 KB chunk for responsive cancel & UI update
+            target_file = staging_dir / fname
+            part_file = staging_dir / f"{fname}.part"
 
-            with open(tmp_file, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=block_size):
-                    if cancel_flag and cancel_flag():
-                        was_cancelled = True
-                        break
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if progress_cb and total_size > 0:
-                            pct = min(100, int((downloaded / total_size) * 100))
-                            progress_cb(pct, downloaded, total_size)
+            with requests.get(f_url, stream=True, timeout=60, headers=headers, allow_redirects=True) as resp:
+                resp.raise_for_status()
+                with open(part_file, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=256 * 1024):
+                        if cancel_flag and cancel_flag():
+                            was_cancelled = True
+                            break
+                        if chunk:
+                            f.write(chunk)
+                            overall_downloaded += len(chunk)
+                            if progress_cb:
+                                pct = min(99, int((overall_downloaded / max(1, total_bytes_all)) * 100))
+                                progress_cb(pct, overall_downloaded, total_bytes_all)
+
+            if was_cancelled:
+                break
+
+            if part_file.exists():
+                os.replace(str(part_file), str(target_file))
 
         if was_cancelled:
-            if tmp_file.exists():
-                tmp_file.unlink(missing_ok=True)
+            shutil.rmtree(staging_dir, ignore_errors=True)
             return False
 
-        # Check sha256 if expected
-        if expected_sha:
-            if not verify_file_sha256(tmp_file, expected_sha):
-                if tmp_file.exists():
-                    tmp_file.unlink(missing_ok=True)
+        # Post-download verification
+        if pkg_id == "sensevoice_small":
+            main_w = staging_dir / "model.pt"
+            if not (main_w.exists() and main_w.stat().st_size > 100 * 1024 * 1024):
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                raise ValueError("Tệp trọng số SenseVoice model.pt bị thiếu hoặc tải chưa hoàn tất.")
+        elif pkg_id == "whisper_large_v3":
+            main_w = staging_dir / "model.bin"
+            if not (main_w.exists() and main_w.stat().st_size > 100 * 1024 * 1024):
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                raise ValueError("Tệp trọng số faster-whisper model.bin bị thiếu hoặc tải chưa hoàn tất.")
+        elif expected_sha:
+            fname = files_to_get[0][0]
+            if not verify_file_sha256(staging_dir / fname, expected_sha):
+                shutil.rmtree(staging_dir, ignore_errors=True)
                 raise ValueError(f"Mã kiểm tra SHA256 không khớp cho gói {pkg_id}")
 
-        # Install
-        if pkg_format in ("zip", "wheel") or tmp_file.suffix in (".zip", ".whl"):
+        # Atomic installation into dest_dir
+        if is_directory_package:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            for item in staging_dir.iterdir():
+                dest_file = dest_dir / item.name
+                if dest_file.exists():
+                    if dest_file.is_dir():
+                        shutil.rmtree(dest_file, ignore_errors=True)
+                    else:
+                        dest_file.unlink(missing_ok=True)
+                shutil.move(str(item), str(dest_file))
+        elif pkg_format in ("zip", "wheel") or files_to_get[0][0].endswith((".zip", ".whl")):
             import zipfile
-            with zipfile.ZipFile(tmp_file, "r") as z:
+            with zipfile.ZipFile(staging_dir / files_to_get[0][0], "r") as z:
                 z.extractall(dest_dir)
-            if tmp_file.exists():
-                tmp_file.unlink(missing_ok=True)
         else:
-            if final_file.exists():
-                final_file.unlink(missing_ok=True)
-            shutil.move(str(tmp_file), str(final_file))
+            fname = files_to_get[0][0]
+            dest_file = dest_dir / fname
+            if dest_file.exists():
+                dest_file.unlink(missing_ok=True)
+            shutil.move(str(staging_dir / fname), str(dest_file))
+
+        shutil.rmtree(staging_dir, ignore_errors=True)
 
         # Mark installed in installed.json
         installed = get_installed_components()
         installed[pkg_id] = {
             "version": int(pkg.get("version", 1)),
             "path": str(dest_dir.resolve()),
-            "file": str(final_file.resolve()),
             "name": pkg.get("name", pkg_id),
             "installed_at": time.time(),
+            "status": "ready",
         }
         save_installed_components(installed)
+
+        if progress_cb:
+            progress_cb(100, total_bytes_all, total_bytes_all)
+
         return True
     except Exception as e:
-        if tmp_file.exists():
-            try:
-                tmp_file.unlink(missing_ok=True)
-            except Exception:
-                pass
+        shutil.rmtree(staging_dir, ignore_errors=True)
         raise e
-    finally:
-        # Guarantee no leftover partial/garbage file remains on disk
-        if tmp_file.exists():
-            try:
-                tmp_file.unlink(missing_ok=True)
-            except Exception:
-                pass
+
+
+def cleanup_dangling_staging_files():
+    """Remove any leftover .staging_* or .part files from previously terminated app runs."""
+    import shutil
+    from dubstudio.paths import get_models_dir, get_user_data_dir
+    for base in [get_models_dir(), get_user_data_dir()]:
+        if base.exists():
+            for p in base.glob("**/.staging_*"):
+                try:
+                    if p.is_dir():
+                        shutil.rmtree(p, ignore_errors=True)
+                    else:
+                        p.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            for p in base.glob("**/*.part"):
+                try:
+                    p.unlink(missing_ok=True)
+                except Exception:
+                    pass

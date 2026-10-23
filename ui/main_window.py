@@ -403,6 +403,8 @@ class MainWindow(QMainWindow):
         asr_ready, _ = is_component_ready(asr_pkg)
         sep_ready, _ = is_component_ready(sep_pkg)
         tts_ready, _ = is_component_ready("vieneu_tts_voices")
+        torch_ready, _ = is_component_ready("torch_core")
+        ffmpeg_ready, _ = is_component_ready("ffmpeg_binaries")
 
         missing = []
         if not asr_ready:
@@ -410,7 +412,11 @@ class MainWindow(QMainWindow):
         if not sep_ready:
             missing.append(f"Mô hình tách nhạc nền: {sep_name}")
         if not tts_ready:
-            missing.append("Mô hình giọng đọc thuyết minh: VieNeu-TTS")
+            missing.append("Mô hình giọng đọc thuyết minh: VieNeu-TTS v3")
+        if not torch_ready:
+            missing.append("Môi trường AI: PyTorch & CUDA Runtime")
+        if not ffmpeg_ready:
+            missing.append("Công cụ đa phương tiện: FFmpeg")
 
         info = {
             "asr_name": asr_name,
@@ -420,6 +426,8 @@ class MainWindow(QMainWindow):
             "sep_pkg": sep_pkg,
             "sep_ready": sep_ready,
             "tts_ready": tts_ready,
+            "torch_ready": torch_ready,
+            "ffmpeg_ready": ffmpeg_ready,
         }
         return (len(missing) == 0, info, missing)
 
@@ -488,7 +496,15 @@ class MainWindow(QMainWindow):
         if comp_updates:
             from ui.dialogs.component_update_dialog import ComponentUpdateDialog
             up_dlg = ComponentUpdateDialog(comp_updates[0], parent=self)
-            up_dlg.exec()
+            dlg_res = up_dlg.exec()
+            if dlg_res == 1 or getattr(up_dlg, "user_agreed", False):
+                self._btn_settings.setChecked(True)
+                self._on_nav_clicked(4)
+                pkg = comp_updates[0].get("package", {})
+                pkg_id = pkg.get("id")
+                if pkg_id and hasattr(self, "_settings_page"):
+                    from PyQt6.QtCore import QTimer
+                    QTimer.singleShot(250, lambda pid=pkg_id: self._settings_page._trigger_download_by_pkg_id(pid))
             return
 
         # 3. Check readiness of active models selected in Settings
@@ -497,7 +513,7 @@ class MainWindow(QMainWindow):
             msg = (
                 f"Hệ thống phát hiện mô hình bạn đang chọn để làm việc trong Cài đặt CHƯA ĐƯỢC TẢI:\n\n"
                 + "\n".join(f"  • {m}" for m in missing)
-                + "\n\nBạn có muốn chuyển sang mục 'Cài đặt' để tải ngay bây giờ không?"
+                + "\n\nBạn có muốn chuyển sang mục 'Cài đặt' và tự động tải ngay bây giờ không?"
             )
             reply = QMessageBox.warning(
                 self,
@@ -508,22 +524,28 @@ class MainWindow(QMainWindow):
             if reply == QMessageBox.StandardButton.Yes:
                 self._btn_settings.setChecked(True)
                 self._on_nav_clicked(4)
-                if hasattr(self, "_settings_page"):
-                    self._settings_page._render_components_ui()
+                target_pkg = info.get("asr_pkg") if not info.get("asr_ready") else info.get("sep_pkg")
+                if target_pkg and hasattr(self, "_settings_page"):
+                    from PyQt6.QtCore import QTimer
+                    QTimer.singleShot(250, lambda pid=target_pkg: self._settings_page._trigger_download_by_pkg_id(pid))
             return
 
         # 4. Everything is up to date and all selected models are ready
         asr_info = f"{info['asr_name']} (Đã sẵn sàng)"
         sep_info = f"{info['sep_name']} (Đã sẵn sàng)"
         tts_info = "VieNeu-TTS v3 (Đã sẵn sàng)"
+        torch_info = "PyTorch & CUDA Runtime (Đã sẵn sàng)"
+        ffmpeg_info = "FFmpeg NVENC/CPU (Đã sẵn sàng)"
         QMessageBox.information(
             self,
             "Kiểm tra cập nhật",
             f"Bạn đang sử dụng phiên bản mới nhất (v{CURRENT_VERSION})!\n\n"
-            f"Trạng thái mô hình đang chọn làm việc:\n"
+            f"Trạng thái mô hình & thư viện AI đang sử dụng:\n"
             f"  • Nhận diện giọng nói: {asr_info}\n"
             f"  • Tách nhạc nền & thoại: {sep_info}\n"
-            f"  • Giọng thuyết minh: {tts_info}\n\n"
+            f"  • Giọng đọc thuyết minh: {tts_info}\n"
+            f"  • Nền tảng AI: {torch_info}\n"
+            f"  • Công cụ kết xuất: {ffmpeg_info}\n\n"
             f"Toàn bộ tài nguyên đã sẵn sàng hoạt động.",
         )
 

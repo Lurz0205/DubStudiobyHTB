@@ -94,7 +94,7 @@ print(f"Created new tree: {new_tree_sha[:7]}", flush=True)
 
 # 6. Create commit
 commit_payload = {
-    "message": "Release v1.0.1: Sync complete DubStudio source code for CI/CD",
+    "message": "Release v1.1.0: Complete DubStudio source code for CI/CD",
     "tree": new_tree_sha,
     "parents": [parent_commit_sha],
 }
@@ -119,3 +119,29 @@ if ref_update.status_code != 200:
     exit(1)
 
 print(f"\n[THANH CONG] Toan bo ma nguon da duoc dong bo len branch main (Commit: {new_commit_sha[:7]})!", flush=True)
+
+# 8. Create or update tag v1.1.0 to trigger GitHub Actions build_release.yml
+tag_name = "v1.1.0"
+tag_ref = f"refs/tags/{tag_name}"
+tag_payload = {"ref": tag_ref, "sha": new_commit_sha}
+tag_resp = session.post(f"{api_base}/git/refs", json=tag_payload)
+if tag_resp.status_code == 201:
+    print(f"[THANH CONG] Da tao Git Tag {tag_name} tren GitHub! GitHub Actions se tu dong build va release.", flush=True)
+elif tag_resp.status_code == 422:
+    patch_resp = session.patch(f"{api_base}/git/refs/tags/{tag_name}", json={"sha": new_commit_sha, "force": True})
+    if patch_resp.status_code == 200:
+        print(f"[THANH CONG] Da cap nhat Git Tag {tag_name} ve commit {new_commit_sha[:7]}!", flush=True)
+    else:
+        print(f"Notice: Khong the cap nhat tag {tag_name}: {patch_resp.status_code} {patch_resp.text}", flush=True)
+
+# 9. Also trigger workflow_dispatch directly to guarantee build execution
+try:
+    wf_resp = session.post(
+        f"{api_base}/actions/workflows/build_release.yml/dispatches",
+        json={"ref": "main", "inputs": {"version": "1.1.0", "tag_name": tag_name}},
+    )
+    if wf_resp.status_code in (204, 201):
+        print(f"[THANH CONG] Da kich hoat workflow build_release.yml tren GitHub Actions Azure!", flush=True)
+except Exception as e:
+    print(f"Notice: dispatch error: {e}", flush=True)
+
