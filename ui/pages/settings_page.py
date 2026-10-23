@@ -941,16 +941,20 @@ class SettingsPage(QWidget):
             cur_pbar = entry.get("pbar") if entry else pbar
             cur_badge = entry.get("badge") if entry else status_badge
 
-            mb_down = down / (1024 * 1024)
-            mb_tot = tot / (1024 * 1024)
+            mb_down = max(0.0, float(down) / (1024 * 1024))
+            mb_tot = max(0.0, float(tot) / (1024 * 1024)) if tot and tot > 0 else 0.0
+            pct_val = max(0, min(100, int(pct)))
             try:
                 if cur_pbar:
-                    cur_pbar.setValue(pct)
+                    cur_pbar.setValue(pct_val)
                 if cur_badge:
-                    cur_badge.setText(f"⏳ {pct}% ({mb_down:.1f}/{mb_tot:.1f} MB)")
+                    if mb_tot > 0:
+                        cur_badge.setText(f"⏳ {pct_val}% ({mb_down:.1f}/{mb_tot:.1f} MB)")
+                    else:
+                        cur_badge.setText(f"⏳ {pct_val}% ({mb_down:.1f} MB)")
             except (RuntimeError, AttributeError):
                 pass
-            self._update_app_status(f"⏳ Đang tải {pkg.get('name')}: {pct}% ({mb_down:.1f}/{mb_tot:.1f} MB)...")
+            self._update_app_status(f"⏳ Đang tải {pkg.get('name')}: {pct_val}% ({mb_down:.1f}/{mb_tot:.1f} MB)...")
 
         def _on_done(pid, ok, msg):
             self._active_downloading_pkgs.discard(pkg_id)

@@ -119,8 +119,16 @@ else:
     new_tree_sha = base_tree_sha
 
 # 6. Create commit
+import sys
+commit_msg = "Release: Patch v1.1.1 - Fix ASR BPE loading, project-scoped cache & dub gate"
+for i, arg in enumerate(sys.argv):
+    if arg == "--msg" and i + 1 < len(sys.argv):
+        commit_msg = sys.argv[i + 1]
+    elif arg.startswith("--msg="):
+        commit_msg = arg.split("=", 1)[1]
+
 commit_payload = {
-    "message": "Docs & Fix: Update README for v1.1.0 and add pre-flight gate for dubbing without subtitles",
+    "message": commit_msg,
     "tree": new_tree_sha,
     "parents": [parent_commit_sha],
 }

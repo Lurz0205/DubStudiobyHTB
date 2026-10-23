@@ -95,13 +95,56 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
                     hint_vi="Vui lòng chuyển sang tab Cài đặt để tải lại gói SenseVoice-Small.",
                 )
 
-            asr_model = AutoModel(
-                model=str(model_dir.resolve()),
-                vad_model="fsmn-vad",
-                vad_kwargs=vad_kwargs,
-                device=device if device == "cpu" else "cuda:0",
-                disable_update=True,
-            )
+            # Locate BPE model file
+            bpe_file = None
+            for bpe_cand in [
+                model_dir / "chn_jpn_yue_eng_ko_spectok.bpe.model",
+                model_dir / "bpe.model",
+            ]:
+                if bpe_cand.is_file():
+                    bpe_file = bpe_cand
+                    break
+
+            bpe_std = model_dir / "bpe.model"
+            if not bpe_std.is_file() and bpe_file and bpe_file.is_file():
+                try:
+                    import shutil
+                    shutil.copyfile(bpe_file, bpe_std)
+                except Exception:
+                    pass
+
+            # Locate local VAD model if available
+            vad_candidates = [
+                models_root / "fsmn-vad",
+                get_app_dir() / "models" / "fsmn-vad",
+                Path("models/fsmn-vad"),
+                Path.home() / ".cache" / "modelscope" / "models" / "iic--speech_fsmn_vad_zh-cn-16k-common-pytorch" / "snapshots" / "master",
+            ]
+            vad_target = "fsmn-vad"
+            for vc in vad_candidates:
+                if vc.is_dir() and (vc / "model.pt").is_file():
+                    vad_target = str(vc.resolve())
+                    break
+
+            model_kwargs = {
+                "model": str(model_dir.resolve()),
+                "vad_model": vad_target,
+                "vad_kwargs": vad_kwargs,
+                "device": device if device == "cpu" else "cuda:0",
+                "disable_update": True,
+            }
+            if bpe_file and bpe_file.is_file():
+                model_kwargs["tokenizer_conf"] = {"bpemodel": str(bpe_file.resolve())}
+
+            try:
+                asr_model = AutoModel(**model_kwargs)
+            except Exception as e_model:
+                if device != "cpu":
+                    emit_event(stage_name, 15.0, "CUDA gặp sự cố, tự động chuyển SenseVoice sang CPU...")
+                    model_kwargs["device"] = "cpu"
+                    asr_model = AutoModel(**model_kwargs)
+                else:
+                    raise e_model
 
             emit_event(stage_name, 40.0, "Đang bóc tách phân đoạn thoại tiếng Trung qua SenseVoice...")
             res = asr_model.generate(

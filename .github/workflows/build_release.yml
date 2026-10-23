@@ -179,3 +179,26 @@ jobs:
             --tag "$env:TAG" `
             --merge `
             --publish
+
+      - name: Update Release Notes
+        shell: pwsh
+        run: |
+          $tag = "$env:TAG"
+          $headers = @{
+            "Authorization" = "token ${{ secrets.GITHUB_TOKEN }}"
+            "Accept" = "application/vnd.github.v3+json"
+            "User-Agent" = "GitHub-Actions-ReleaseNotes"
+          }
+          if (Test-Path "RELEASE_NOTES.md") {
+            $notes = Get-Content -Raw -Encoding utf8 "RELEASE_NOTES.md"
+            try {
+              $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" -Headers $headers
+              if ($rel -and $rel.id) {
+                $body = @{ body = $notes } | ConvertTo-Json
+                Invoke-RestMethod -Method Patch -Uri "https://api.github.com/repos/${{ github.repository }}/releases/$($rel.id)" -Headers $headers -Body $body -ContentType "application/json; charset=utf-8"
+                Write-Host "Updated release notes for $tag successfully!"
+              }
+            } catch {
+              Write-Host "Could not update release notes: $_"
+            }
+          }

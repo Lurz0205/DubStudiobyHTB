@@ -516,8 +516,9 @@ def _do_download_component_file(
     was_cancelled = False
 
     try:
+        from dubstudio.version import APP_VERSION
         headers = {
-            "User-Agent": "DubStudio-Downloader/1.1.0",
+            "User-Agent": f"DubStudio-Downloader/{APP_VERSION}",
             "Accept": "*/*",
         }
         for fname, f_url, approx_len in files_to_get:
@@ -558,6 +559,13 @@ def _do_download_component_file(
             if not (main_w.exists() and main_w.stat().st_size > 100 * 1024 * 1024):
                 shutil.rmtree(staging_dir, ignore_errors=True)
                 raise ValueError("Tệp trọng số SenseVoice model.pt bị thiếu hoặc tải chưa hoàn tất.")
+            bpe_src = staging_dir / "chn_jpn_yue_eng_ko_spectok.bpe.model"
+            bpe_dst = staging_dir / "bpe.model"
+            if bpe_src.exists() and not bpe_dst.exists():
+                try:
+                    shutil.copyfile(bpe_src, bpe_dst)
+                except Exception:
+                    pass
         elif pkg_id == "whisper_large_v3":
             main_w = staging_dir / "model.bin"
             if not (main_w.exists() and main_w.stat().st_size > 100 * 1024 * 1024):

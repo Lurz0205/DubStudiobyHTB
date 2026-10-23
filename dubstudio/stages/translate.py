@@ -653,7 +653,7 @@ def run(job: JobContext, cfg: AppConfig) -> None:
             on_batch_done=_persist_disk,
         )
     else:
-        translator = GeminiTranslator(cfg=cfg, cache_dir=cfg.general.workspace_dir / ".cache" / "llm")
+        translator = GeminiTranslator(cfg=cfg, cache_dir=job.workspace / ".cache" / "llm")
         translated_items = translator.translate_segments(
             items,
             stage_name=stage_name,

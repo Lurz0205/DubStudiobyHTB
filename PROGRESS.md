@@ -14,14 +14,13 @@
   - Nâng cấp nút "Kiểm tra cập nhật": kiểm tra GitHub release, kiểm tra gói cập nhật, và xác thực trực tiếp xem các mô hình đang chọn làm việc trong Cài đặt (ASR, tách nhạc, TTS) đã tải chưa. Cảnh báo và chuyển hướng 1-click vào Cài đặt nếu thiếu.
   - Hỗ trợ tải tự động trọn gói cho `whisper_large_v3` & `sensevoice_small` qua HuggingFace Hub snapshot.
   - 140/140 unit tests pass 100% (`pytest tests/ -q`). Rebuild `dist\DubStudio\DubStudio.exe` hoàn tất, selftest code 0 (Commit `eb21870`).
-- **Giai đoạn 4 & Bản phát hành v1.1.0 (Beta Release):**
-  - Khắc phục triệt để `[WinError 10013]` qua `WindowsSelectorEventLoopPolicy` & `asyncio.new_event_loop()` riêng trong thread uvicorn, loại bỏ lỗi socketpair/Proactor.
-  - Sửa lỗi mất tiếng preview video: Khi tạo dự án mới chưa có track tách nhạc/lồng tiếng, tự động giữ nguyên âm thanh gốc của video ở mức 100% thay vì mute nhầm sang chế độ multi-track.
-  - Pre-flight Model Gate: Kiểm tra tính sẵn sàng thực tế của `model.pt` (>100MB), chặn ngay từ UI nếu đang tải dở hoặc chưa tải, loại bỏ hoàn toàn hiện tượng trọng số ngẫu nhiên sinh text ảo.
-  - Khóa tải đơn tiến trình toàn cục (`_GLOBAL_DOWNLOADING_LOCK`): Triệt tiêu nguy cơ tải trùng lặp hoặc xung đột đa tiến trình khi người dùng tương tác liên tục.
-  - Tải streaming 256KB trực tiếp vào thư mục tạm `.staging_*`, hủy tức thì <0.1s, dọn sạch rác khi tắt/mở app.
-  - Nâng cấp phiên bản lên `v1.1.0`, build lại `dist\DubStudio\DubStudio.exe` hoàn chỉnh (Selftest Exit Code: 0).
-  - Đạt 145/145 unit tests passed (100%). Đẩy commit `0d3a78f` và Tag `v1.1.0` lên GitHub Actions Azure để tự động đóng gói Velopack.
+- **Giai đoạn 4 (Bản phát hành v1.1.0 & Fix lỗi ASR SenseVoice):**
+  - Khắc phục triệt để `[WinError 10013]` socketpair, sửa lỗi mất tiếng preview video (`video_player.py`), chặn tiền kiểm tạo lồng tiếng khi chưa có phụ đề.
+  - Sửa lỗi `[ASR_FAILED]` của SenseVoice (`NOT_FOUND: "None"`): Tự động nạp `bpemodel` (`chn_jpn_yue_eng_ko_spectok.bpe.model`), đồng bộ `bpe.model` và tích hợp VAD offline cục bộ (`fsmn-vad`).
+  - Dọn dẹp 100% cache cũ, chuyển cache dịch thuật & co giãn sang phạm vi dự án (`job.workspace/.cache`) giúp xóa dự án là xóa sạch cache, không bị lưu phụ đề cũ.
+  - Đạt 145/145 unit tests passed (100%). Đã đồng bộ trực tiếp vào `dist\DubStudio\DubStudio.exe`. Chế độ đóng gói độc lập pass `sim_user_machine.ps1`.
 
-## Tiếp theo (Next)
-- Bạn có thể chạy thử trực tiếp `dist\DubStudio\DubStudio.exe` trên máy để nghiệm thu.
+## Quy trình Phát hành & Cập nhật vi sai (Release & Patch Workflow)
+- **Bản gốc Baseline:** `v1.1.0` đã được đóng gói đầy đủ trên GitHub Releases (`Setup.exe`, `full.nupkg`).
+- **Môi trường phát triển:** Mọi commit sửa lỗi hàng ngày chỉ đẩy lên branch `main` (`push_code_to_github.py`), tuyệt đối **không tự ý tạo tag hay ghi đè bản release cũ**.
+- **Quy trình xuất bản Patch:** Khi tích lũy đủ các bản sửa lỗi, chỉ cần nâng version (ví dụ `1.1.1`) và chạy `python scripts/push_code_to_github.py --tag v1.1.1`. GitHub Actions sẽ tự động tạo `delta.nupkg` để máy người dùng tự động cập nhật vi sai nhẹ nhàng qua Velopack.

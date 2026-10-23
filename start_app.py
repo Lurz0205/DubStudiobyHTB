@@ -48,14 +48,17 @@ if not is_cli_worker and os.environ.get("DUBSTUDIO_DISABLE_MUTEX") != "1" and sy
     from ctypes import wintypes
 
     ERROR_ALREADY_EXISTS = 183
-    MUTEX_NAME = "Global\\DubStudio_App_Instance_Mutex_HTB"
+    ERROR_ACCESS_DENIED = 5
+    MUTEX_NAME = "Local\\DubStudio_App_Instance_Mutex_HTB"
     kernel32 = ctypes.windll.kernel32
     user32 = ctypes.windll.user32
 
     _instance_mutex = kernel32.CreateMutexW(None, False, MUTEX_NAME)
-    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+    last_err = kernel32.GetLastError()
+    if last_err in (ERROR_ALREADY_EXISTS, ERROR_ACCESS_DENIED) or _instance_mutex == 0:
         # Check if an existing DubStudio window is visible to bring to front
-        hwnd = user32.FindWindowW(None, "DubStudio - Lồng tiếng & Phụ đề tự động")
+        exact_title = "DubStudio — Trình lồng tiếng & Chỉnh sửa Video AI"
+        hwnd = user32.FindWindowW(None, exact_title)
         found_window = [False]
         if hwnd and user32.IsWindowVisible(hwnd):
             user32.ShowWindow(hwnd, 9)  # SW_RESTORE
@@ -77,9 +80,8 @@ if not is_cli_worker and os.environ.get("DUBSTUDIO_DISABLE_MUTEX") != "1" and sy
             WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
             user32.EnumWindows(WNDENUMPROC(_enum_cb), 0)
 
-        if found_window[0]:
-            sys.exit(0)
-        # If no visible window exists (e.g. dead zombie process), continue and launch GUI
+        # Unconditionally exit this second process to prevent duplicate GUI windows
+        sys.exit(0)
 
 from dubstudio.packaging import ensure_runtime_paths
 ensure_runtime_paths()

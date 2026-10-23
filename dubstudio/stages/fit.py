@@ -341,7 +341,7 @@ def run(job: JobContext, cfg: AppConfig) -> None:
             f"Lượt {pass_idx}/{MAX_REWRITE_PASSES}: Phát hiện {len(major_colliding_indices)} đoạn bị đè âm thanh quá {ALLOWABLE_OVERLAP:.1f}s (>1.1x). Đang gom chùm câu để viết lại ngắn hơn (hệ số co: {shrink_factor * 100:.0f}%)..."
         )
         clusters = build_clusters(major_colliding_indices, segments, window=2)
-        rewriter = FitRewriter(cfg=cfg, cache_dir=cfg.general.workspace_dir / ".cache" / "llm")
+        rewriter = FitRewriter(cfg=cfg, cache_dir=job.workspace / ".cache" / "llm")
 
         all_rewritten_items = {}
         for c_idx, cluster_indices in enumerate(clusters, start=1):

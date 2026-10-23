@@ -582,7 +582,7 @@ class LaunchBrowserCDPWorker(QThread):
 
 class DownloadComponentWorker(QThread):
     """Download AI models or components in background thread with progress feedback."""
-    progress = pyqtSignal(str, int, int, int)  # pkg_id, pct, downloaded, total
+    progress = pyqtSignal(str, int, object, object)  # pkg_id, pct, downloaded (bytes), total (bytes)
     finished = pyqtSignal(str, bool, str)       # pkg_id, ok, msg
     error = pyqtSignal(str, str)                # pkg_id, err_msg
 
