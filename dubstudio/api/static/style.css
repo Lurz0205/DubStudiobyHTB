@@ -1,0 +1,606 @@
+:root {
+  --bg-deep: #090c10;
+  --bg-main: #0d1117;
+  --bg-card: #161b22;
+  --bg-card-hover: #1f242c;
+  --bg-input: #090d13;
+  --border-color: #30363d;
+  --border-focus: #58a6ff;
+  --text-main: #c9d1d9;
+  --text-bright: #f0f6fc;
+  --text-muted: #8b949e;
+  --primary: #238636;
+  --primary-blue: #1f6feb;
+  --primary-blue-hover: #388bfd;
+  --accent: #2ea043;
+  --danger: #f85149;
+  --warning: #d29922;
+  --playhead: #ff4757;
+  --track-bg: #161b22;
+  --clip-bg: #1f6feb;
+  --clip-bg-hover: #388bfd;
+  --clip-active: #9e6a03;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  user-select: none;
+}
+
+input, textarea, select {
+  user-select: auto;
+}
+
+body {
+  background-color: var(--bg-deep);
+  color: var(--text-main);
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Sidebar navigation */
+.sidebar {
+  width: 220px;
+  background-color: var(--bg-main);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.brand {
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.brand h1 {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.5px;
+}
+
+.brand span {
+  color: var(--primary-blue-hover);
+}
+
+.nav-tabs {
+  list-style: none;
+  padding: 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 0.9rem;
+  transition: all 0.15s ease;
+}
+
+.nav-item:hover {
+  background-color: var(--bg-card);
+  color: var(--text-bright);
+}
+
+.nav-item.active {
+  background-color: var(--primary-blue);
+  color: #fff;
+}
+
+/* Main Content area */
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: var(--bg-deep);
+}
+
+.topbar {
+  height: 48px;
+  border-bottom: 1px solid var(--border-color);
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: var(--bg-main);
+  flex-shrink: 0;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.topbar h2 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.tab-pane {
+  display: none;
+  flex: 1;
+  overflow: hidden;
+}
+
+.tab-pane.active {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ==================================================== */
+/* PRO STUDIO DUBBING WORKSPACE (TOP/BOTTOM SPLIT)     */
+/* ==================================================== */
+.studio-workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Top Section: Split between Preview Video & Subtitle Editor */
+.studio-top {
+  display: grid;
+  grid-template-columns: 55% 45%;
+  flex: 1;
+  min-height: 380px;
+  border-bottom: 2px solid var(--border-color);
+  overflow: hidden;
+}
+
+/* Left: Preview Video & Subtitle Styling */
+.preview-column {
+  background-color: var(--bg-deep);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 12px;
+  gap: 10px;
+}
+
+.video-screen-wrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background-color: #000;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--border-color);
+}
+
+video#preview-player {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* Interactive Draggable & Resizable Subtitle Box */
+.draggable-subtitle-box {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 140px;
+  min-height: 44px;
+  max-width: 95%;
+  background-color: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border-radius: 8px;
+  padding: 8px 18px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+  border: 1px dashed rgba(255, 255, 255, 0.35);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+  transition: border-color 0.15s ease;
+}
+
+.draggable-subtitle-box:hover {
+  border-color: var(--primary-blue-hover);
+}
+
+.sub-drag-handle {
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: grab;
+  padding: 1px 6px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  margin-bottom: 4px;
+  user-select: none;
+}
+
+.sub-drag-handle:active {
+  cursor: grabbing;
+}
+
+.subtitle-text {
+  width: 100%;
+  text-align: center;
+  font-size: 22px;
+  color: #ffffff;
+  line-height: 1.35;
+  word-break: break-word;
+  pointer-events: none;
+}
+
+/* Resizers */
+.sub-resizer {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background-color: var(--primary-blue-hover);
+  border: 1px solid #ffffff;
+  border-radius: 2px;
+  z-index: 35;
+}
+
+.resizer-nw { top: -4px; left: -4px; cursor: nwse-resize; }
+.resizer-ne { top: -4px; right: -4px; cursor: nesw-resize; }
+.resizer-sw { bottom: -4px; left: -4px; cursor: nesw-resize; }
+.resizer-se { bottom: -4px; right: -4px; cursor: nwse-resize; }
+
+
+/* Subtitle Styling Bar */
+.style-toolbar {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.85rem;
+}
+
+.style-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.style-group label {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.color-picker {
+  -webkit-appearance: none;
+  border: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  cursor: pointer;
+  background: none;
+  padding: 0;
+}
+
+/* Right: Subtitle & Voice Editor */
+.editor-column {
+  background-color: var(--bg-main);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.editor-header {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: var(--bg-card);
+}
+
+.editor-header h3 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.segments-scroll-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.segment-item {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 0.15s ease;
+}
+
+.segment-item.active {
+  border-color: var(--border-focus);
+  background-color: var(--bg-card-hover);
+}
+
+.seg-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.seg-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.seg-controls select {
+  padding: 4px 8px;
+  font-size: 0.8rem;
+}
+
+.seg-src {
+  font-size: 0.85rem;
+  color: #8b949e;
+  font-style: italic;
+}
+
+.seg-input {
+  width: 100%;
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-color);
+  color: var(--text-bright);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.seg-bottom-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ==================================================== */
+/* BOTTOM SECTION: MULTI-TRACK INTERACTIVE TIMELINE     */
+/* ==================================================== */
+.studio-timeline-panel {
+  height: 250px;
+  background-color: var(--bg-deep);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.timeline-controls {
+  height: 38px;
+  background-color: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+}
+
+.timeline-timecode {
+  font-family: monospace;
+  font-size: 0.95rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.timeline-scroll-area {
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  position: relative;
+  background-color: var(--bg-deep);
+}
+
+.timeline-canvas-container {
+  position: relative;
+  height: 100%;
+  min-width: 1500px;
+}
+
+/* Ruler */
+.timeline-ruler {
+  height: 24px;
+  background-color: var(--bg-main);
+  border-bottom: 1px solid var(--border-color);
+  position: relative;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.ruler-tick {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-left: 1px solid var(--border-color);
+  padding-left: 4px;
+  line-height: 24px;
+}
+
+/* Playhead */
+.playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background-color: var(--playhead);
+  z-index: 50;
+  pointer-events: none;
+  left: 0px;
+}
+
+.playhead-handle {
+  position: absolute;
+  top: 0;
+  left: -6px;
+  width: 14px;
+  height: 16px;
+  background-color: var(--playhead);
+  clip-path: polygon(0% 0%, 100% 0%, 100% 60%, 50% 100%, 0% 60%);
+  cursor: ew-resize;
+  pointer-events: auto;
+}
+
+/* Tracks */
+.track-lane {
+  position: relative;
+  height: 55px;
+  margin: 6px 0;
+  background-color: rgba(22, 27, 34, 0.6);
+  border-top: 1px dashed rgba(48, 54, 61, 0.5);
+  border-bottom: 1px dashed rgba(48, 54, 61, 0.5);
+}
+
+.track-label {
+  position: sticky;
+  left: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  z-index: 20;
+  background: rgba(13, 17, 23, 0.8);
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-block;
+  margin-top: 4px;
+}
+
+/* Draggable Clips / Blocks */
+.timeline-clip {
+  position: absolute;
+  top: 16px;
+  height: 34px;
+  background-color: var(--clip-bg);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.8rem;
+  padding: 6px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: grab;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  transition: background-color 0.1s;
+}
+
+.timeline-clip:active {
+  cursor: grabbing;
+  background-color: var(--clip-bg-hover);
+}
+
+.timeline-clip.selected {
+  border: 2px solid #fff;
+  background-color: var(--clip-active);
+}
+
+/* Pre-process Modal */
+.modal-backdrop {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.75);
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-backdrop.open {
+  display: flex;
+}
+
+.modal-content {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  width: 520px;
+  max-width: 90vw;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background-color: var(--primary-blue);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn:hover { background-color: var(--primary-blue-hover); }
+.btn-success { background-color: var(--accent); }
+.btn-secondary { background-color: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-main); }
+.btn-sm { padding: 4px 8px; font-size: 0.75rem; }
+
+/* Interactive Video Editor Overlays */
+.interactive-overlay-box {
+  box-sizing: border-box;
+  touch-action: none;
+}
+
+.edit-resizer {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background-color: #fff;
+  border: 1px solid #000;
+  border-radius: 50%;
+  z-index: 10;
+}
+
+.edit-resizer.resizer-nw { top: -5px; left: -5px; cursor: nw-resize; }
+.edit-resizer.resizer-ne { top: -5px; right: -5px; cursor: ne-resize; }
+.edit-resizer.resizer-sw { bottom: -5px; left: -5px; cursor: sw-resize; }
+.edit-resizer.resizer-se { bottom: -5px; right: -5px; cursor: se-resize; }
+

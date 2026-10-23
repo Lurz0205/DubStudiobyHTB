@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DubStudio — Pro Studio Lồng tiếng & Phụ đề Video</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand">
+      <h1>Dub<span>Studio</span> Pro</h1>
+    </div>
+    <ul class="nav-tabs">
+      <li class="nav-item active" data-tab="dub">🎙️ Lồng tiếng</li>
+      <li class="nav-item" data-tab="editor">🎬 Trình chỉnh sửa</li>
+      <li class="nav-item" data-tab="settings">🔑 Tài khoản dịch</li>
+      <li class="nav-item" data-tab="guide">📖 Hướng dẫn</li>
+    </ul>
+    <div style="padding: 12px 16px; font-size: 0.75rem; color: var(--text-muted); border-top: 1px solid var(--border-color);">
+      Phiên bản 2.0 Studio Pro
+    </div>
+  </aside>
+
+  <!-- Main Content Area -->
+  <main class="main-content">
+    <header class="topbar">
+      <div class="topbar-left">
+        <h2 id="current-job-title">Tác vụ: Chưa chọn</h2>
+        <button id="btn-open-preprocess" class="btn btn-sm btn-success">➕ Bắt đầu Video mới</button>
+      </div>
+      <div>
+        <select id="job-select" style="min-width: 240px; padding: 4px 8px; font-size: 0.85rem;"></select>
+      </div>
+    </header>
+
+    <!-- TAB 1: STUDIO BIÊN TẬP LỒNG TIẾNG (PRO STUDIO) -->
+    <section id="tab-dub" class="tab-pane active">
+      <div class="studio-workspace">
+        
+        <!-- NỬA TRÊN: PREVIEW VIDEO & SUBTITLE EDITOR -->
+        <div class="studio-top">
+          <!-- Cột trái: Màn hình Preview Video & Styling -->
+          <div class="preview-column">
+            <div class="video-screen-wrapper" id="video-wrapper">
+              <video id="preview-player" controls preload="auto"></video>
+              <div id="subtitle-box" class="draggable-subtitle-box">
+                <div id="sub-drag-handle" class="sub-drag-handle" title="Kéo chuột để di chuyển">✥ Kéo vị trí</div>
+                <div id="subtitle-text" class="subtitle-text">Xem trước phụ đề</div>
+                <!-- Resizer handles -->
+                <div class="sub-resizer resizer-nw" data-handle="nw"></div>
+                <div class="sub-resizer resizer-ne" data-handle="ne"></div>
+                <div class="sub-resizer resizer-sw" data-handle="sw"></div>
+                <div class="sub-resizer resizer-se" data-handle="se"></div>
+              </div>
+            </div>
+
+            <!-- Thanh điều chỉnh Nâng cao: Font, Cỡ, Màu, Nền, Bo góc, Mờ nhòe -->
+            <div class="style-toolbar">
+              <span style="font-weight: 600; font-size: 0.8rem; color: var(--text-bright);">🎨 Phụ đề:</span>
+              <div class="style-group">
+                <label>Phông:</label>
+                <select id="sub-font-name">
+                  <option value="Arial">Arial</option>
+                  <option value="Roboto">Roboto</option>
+                  <option value="Montserrat">Montserrat</option>
+                  <option value="Be Vietnam Pro">Be Vietnam Pro</option>
+                  <option value="Times New Roman">Times New Roman</option>
+                </select>
+              </div>
+              <div class="style-group">
+                <label>Cỡ:</label>
+                <input type="number" id="sub-font-size" value="22" min="12" max="60" style="width: 50px; padding: 2px 4px;" />
+              </div>
+              <div class="style-group">
+                <label>Màu chữ:</label>
+                <input type="color" id="sub-color-primary" value="#ffffff" class="color-picker" title="Màu chữ" />
+              </div>
+              <div class="style-group">
+                <label>Viền:</label>
+                <input type="color" id="sub-color-outline" value="#000000" class="color-picker" title="Màu viền chữ" />
+              </div>
+              <div class="style-group">
+                <label>Màu nền:</label>
+                <input type="color" id="sub-color-bg" value="#000000" class="color-picker" title="Màu nền" />
+              </div>
+              <div class="style-group">
+                <label>Độ trong suốt nền:</label>
+                <input type="range" id="sub-bg-opacity" min="0" max="100" value="65" style="width: 60px;" title="Độ đậm nhạt nền" />
+              </div>
+              <div class="style-group">
+                <label>Bo góc:</label>
+                <input type="number" id="sub-box-radius" value="8" min="0" max="30" style="width: 45px; padding: 2px 4px;" />
+              </div>
+              <div class="style-group">
+                <label>Mờ nhòe (Blur):</label>
+                <input type="number" id="sub-box-blur" value="6" min="0" max="25" style="width: 45px; padding: 2px 4px;" />
+              </div>
+              <div class="style-group">
+                <label>Căn lề:</label>
+                <select id="sub-text-align">
+                  <option value="center">Giữa</option>
+                  <option value="left">Trái</option>
+                  <option value="right">Phải</option>
+                </select>
+              </div>
+              <button id="btn-reset-style" class="btn btn-sm btn-secondary" title="Đặt lại kiểu chữ & vị trí về mặc định">🔄 Mặc định</button>
+              <button id="btn-save-style" class="btn btn-sm btn-success">💾 Lưu Vị trí & Kiểu chữ</button>
+            </div>
+          </div>
+
+          <!-- Cột phải: Subtitle & Voice Editor -->
+          <div class="editor-column">
+            <div class="editor-header">
+              <h3>Danh sách câu thoại (Sửa chữ, đổi giọng & tốc độ)</h3>
+              <span id="segments-count-badge" style="font-size: 0.8rem; color: var(--accent);">0 câu</span>
+            </div>
+            <div id="segments-scroll-list" class="segments-scroll-list">
+              <!-- Rendered dynamically by app.js -->
+            </div>
+          </div>
+        </div>
+
+        <!-- NỬA DƯỚI: MULTI-TRACK INTERACTIVE TIMELINE -->
+        <div class="studio-timeline-panel">
+          <div class="timeline-controls">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <button id="tl-btn-play" class="btn btn-sm btn-secondary">▶ Phát</button>
+              <span id="tl-timecode" class="timeline-timecode">00:00.00 / 00:00.00</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 0.8rem; color: var(--text-muted);">Thu phóng:</span>
+              <button id="tl-zoom-out" class="btn btn-sm btn-secondary">-</button>
+              <button id="tl-zoom-in" class="btn btn-sm btn-secondary">+</button>
+              <button id="tl-btn-save-timing" class="btn btn-sm btn-success">💾 Lưu mốc thời gian</button>
+            </div>
+          </div>
+
+          <!-- Timeline Ruler & Tracks -->
+          <div id="timeline-scroll-area" class="timeline-scroll-area">
+            <div id="timeline-canvas" class="timeline-canvas-container">
+              <!-- Playhead line -->
+              <div id="timeline-playhead" class="playhead">
+                <div class="playhead-handle" id="playhead-handle"></div>
+              </div>
+
+              <!-- Time Ruler -->
+              <div id="timeline-ruler" class="timeline-ruler"></div>
+
+              <!-- Track 1: Video Track -->
+              <div class="track-lane" id="track-video">
+                <span class="track-label">🎬 Video gốc</span>
+                <div id="video-clip-block" style="position: absolute; top: 16px; left: 0; height: 34px; background: #2b313e; border-radius: 4px; padding: 6px 12px; font-size: 0.8rem; color: #fff;">
+                  Clip Video
+                </div>
+              </div>
+
+              <!-- Track 2: Subtitle & Voice Dub Track -->
+              <div class="track-lane" id="track-voice">
+                <span class="track-label">🎙️ Lồng tiếng & Sub (Kéo trượt để dời mốc)</span>
+                <!-- Rendered dynamically by app.js -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- TAB 2: TRÌNH CHỈNH SỬA VIDEO -->
+    <section id="tab-editor" class="tab-pane" style="padding: 24px;">
+      <div style="max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <h2 style="font-size: 1.25rem; color: #fff; margin: 0;">🎬 Trình chỉnh sửa Video Studio</h2>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin: 4px 0 0 0;">Cắt khung hình tự do, khối màu che phụ đề/watermark, chèn lớp phủ ảnh logo, hoặc ghép nối video.</p>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button id="btn-mode-crop" class="btn btn-sm btn-success">✂️ Cắt khung & Lớp phủ</button>
+            <button id="btn-mode-merge" class="btn btn-sm btn-secondary">🔗 Ghép nối video</button>
+          </div>
+        </div>
+
+        <!-- PHẦN 1: CẮT KHUNG (CROP) & LỚP PHỦ CHE / LOGO -->
+        <div id="editor-pane-crop" style="display: flex; flex-direction: column; gap: 16px;">
+          <!-- Chọn video đầu vào -->
+          <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px 18px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <label style="font-size: 0.85rem; font-weight: 600;">Tệp video:</label>
+            <input type="text" id="edit-video-input" placeholder="samples/clip.mp4 hoặc out/job_vi.mp4" style="flex: 1; min-width: 260px;" />
+            <button id="btn-edit-load-current" class="btn btn-sm btn-secondary" title="Lấy video của tác vụ hiện tại">📥 Lấy video hiện tại</button>
+            <button id="btn-edit-load-video" class="btn btn-sm btn-primary">▶️ Nạp video</button>
+          </div>
+
+          <!-- Khu vực tương tác chỉnh sửa -->
+          <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+            <!-- Khung Canvas Video Preview -->
+            <div style="flex: 1.2; min-width: 320px; max-width: 600px;">
+              <div id="edit-canvas-wrapper" style="position: relative; width: 100%; height: 350px; background: #0b0f19; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-color); user-select: none;">
+                <video id="edit-video-player" style="max-width: 100%; max-height: 100%; display: block;" playsinline></video>
+                <div id="edit-no-video" style="position: absolute; color: var(--text-muted); font-size: 0.9rem; text-align: center; pointer-events: none; padding: 20px;">
+                  Chưa nạp video.<br><span style="font-size: 0.8rem; opacity: 0.8;">Nhập đường dẫn và bấm "Nạp video" để bắt đầu chỉnh sửa.</span>
+                </div>
+
+                <!-- Khung Cắt hình (Crop Box) -->
+                <div id="edit-crop-box" class="interactive-overlay-box" style="display: none; border: 2px dashed #00ff88; background: rgba(0,255,136,0.12); position: absolute; cursor: move;">
+                  <span style="position: absolute; top: 4px; left: 6px; font-size: 11px; color: #00ff88; font-weight: 600; text-shadow: 1px 1px 2px #000; pointer-events: none;">✂️ Vùng Crop</span>
+                  <div class="edit-resizer resizer-nw" data-target="crop" data-handle="nw"></div>
+                  <div class="edit-resizer resizer-ne" data-target="crop" data-handle="ne"></div>
+                  <div class="edit-resizer resizer-sw" data-target="crop" data-handle="sw"></div>
+                  <div class="edit-resizer resizer-se" data-target="crop" data-handle="se"></div>
+                </div>
+
+                <!-- Khối màu che (Color Box) -->
+                <div id="edit-color-box" class="interactive-overlay-box" style="display: none; position: absolute; cursor: move; border: 1px dashed rgba(255,255,255,0.4);">
+                  <span style="position: absolute; top: 2px; left: 4px; font-size: 10px; color: #fff; text-shadow: 1px 1px 2px #000; pointer-events: none;">⬛ Khối che</span>
+                  <div class="edit-resizer resizer-nw" data-target="color" data-handle="nw"></div>
+                  <div class="edit-resizer resizer-ne" data-target="color" data-handle="ne"></div>
+                  <div class="edit-resizer resizer-sw" data-target="color" data-handle="sw"></div>
+                  <div class="edit-resizer resizer-se" data-target="color" data-handle="se"></div>
+                </div>
+
+                <!-- Lớp phủ ảnh / Logo -->
+                <div id="edit-img-box" class="interactive-overlay-box" style="display: none; position: absolute; cursor: move; border: 1px dashed #38bdf8;">
+                  <img id="edit-img-element" style="width: 100%; height: 100%; object-fit: fill; pointer-events: none; display: block;" />
+                  <div class="edit-resizer resizer-nw" data-target="img" data-handle="nw"></div>
+                  <div class="edit-resizer resizer-ne" data-target="img" data-handle="ne"></div>
+                  <div class="edit-resizer resizer-sw" data-target="img" data-handle="sw"></div>
+                  <div class="edit-resizer resizer-se" data-target="img" data-handle="se"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Bảng tùy chỉnh công cụ -->
+            <div style="flex: 1; min-width: 300px; display: flex; flex-direction: column; gap: 12px;">
+              <!-- 1. Cắt khung hình (Crop) -->
+              <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <label style="font-weight: 600; font-size: 0.85rem; display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" id="edit-enable-crop" /> ✂️ Cắt khung hình (Crop tự do)
+                  </label>
+                  <button id="btn-edit-reset-crop" class="btn btn-sm btn-secondary" style="font-size: 0.75rem; padding: 2px 8px;">Toàn khung</button>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; font-size: 0.8rem;">
+                  <div>X: <input type="number" id="crop-x" value="0" style="width: 100%;" /></div>
+                  <div>Y: <input type="number" id="crop-y" value="0" style="width: 100%;" /></div>
+                  <div>W: <input type="number" id="crop-w" value="600" style="width: 100%;" /></div>
+                  <div>H: <input type="number" id="crop-h" value="350" style="width: 100%;" /></div>
+                </div>
+              </div>
+
+              <!-- 2. Khối màu che (Color Box) -->
+              <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
+                <label style="font-weight: 600; font-size: 0.85rem; display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer;">
+                  <input type="checkbox" id="edit-enable-color-box" /> ⬛ Khối màu che (Che phụ đề / Watermark)
+                </label>
+                <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 0.8rem;">
+                  <div>
+                    <label>Màu:</label>
+                    <input type="color" id="edit-color-val" value="#000000" style="width: 28px; height: 24px; vertical-align: middle; border: none; cursor: pointer;" />
+                  </div>
+                  <div>
+                    <label>Mờ đục:</label>
+                    <input type="range" id="edit-color-opacity" min="0" max="100" value="100" style="width: 75px; vertical-align: middle;" />
+                    <span id="edit-color-opacity-val">100%</span>
+                  </div>
+                  <div>
+                    <label>Bo góc:</label>
+                    <input type="number" id="edit-color-radius" min="0" max="30" value="4" style="width: 42px;" /> px
+                  </div>
+                </div>
+              </div>
+
+              <!-- 3. Lớp phủ ảnh / Logo -->
+              <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
+                <label style="font-weight: 600; font-size: 0.85rem; display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer;">
+                  <input type="checkbox" id="edit-enable-img" /> 🖼️ Lớp phủ hình ảnh / Logo
+                </label>
+                <div style="display: flex; flex-direction: column; gap: 8px; font-size: 0.8rem;">
+                  <input type="file" id="edit-img-upload" accept="image/*" />
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <input type="checkbox" id="edit-img-fix-scale" checked />
+                    <label for="edit-img-fix-scale" style="cursor: pointer;">Khóa tỉ lệ ảnh (Fix Scale / Aspect Ratio)</label>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Xuất tệp đã chỉnh sửa -->
+              <div style="display: flex; gap: 8px; align-items: center; margin-top: 4px;">
+                <input type="text" id="edit-output-name" value="edited_video.mp4" placeholder="Tên tệp xuất (.mp4)" style="flex: 1;" />
+                <button id="btn-run-edit-video" class="btn btn-success" style="white-space: nowrap;">🚀 Xuất video</button>
+              </div>
+              <div id="edit-process-status" style="font-size: 0.85rem;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PHẦN 2: GHÉP NỐI NHIỀU VIDEO -->
+        <div id="editor-pane-merge" style="display: none; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 24px; flex-direction: column; gap: 16px;">
+          <h3 style="font-size: 1.1rem; color: #fff; margin: 0;">🔗 Ghép nối nhiều video thành một</h3>
+          <p style="color: var(--text-muted); font-size: 0.9rem; margin: 0;">Tự động nhận diện stream-copy siêu nhanh hoặc re-encode khi khác thông số.</p>
+
+          <div>
+            <label style="display: block; margin-bottom: 6px; font-size: 0.85rem;">Đường dẫn video 1:</label>
+            <input type="text" id="merge-v1" placeholder="samples/clip1.mp4" style="width: 100%;" />
+          </div>
+
+          <div>
+            <label style="display: block; margin-bottom: 6px; font-size: 0.85rem;">Đường dẫn video 2:</label>
+            <input type="text" id="merge-v2" placeholder="samples/clip2.mp4" style="width: 100%;" />
+          </div>
+
+          <div>
+            <label style="display: block; margin-bottom: 6px; font-size: 0.85rem;">Tên tệp xuất (trong thư mục out/):</label>
+            <input type="text" id="merge-out" value="merged_output.mp4" style="width: 100%;" />
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="checkbox" id="merge-reencode" />
+            <label for="merge-reencode" style="cursor: pointer; font-size: 0.85rem;">Bắt buộc mã hóa lại (re-encode)</label>
+          </div>
+
+          <button id="btn-merge" class="btn">Tiến hành ghép video</button>
+          <div id="merge-status" style="font-size: 0.9rem;"></div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- TAB 4: TÀI KHOẢN DỊCH -->
+    <section id="tab-settings" class="tab-pane" style="padding: 24px;">
+      <div style="max-width: 650px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+        <h3 style="font-size: 1.1rem; color: #fff;">🔑 Cài đặt Tài khoản dịch & Giọng đọc</h3>
+
+        <div>
+          <label style="display: block; margin-bottom: 6px; font-size: 0.85rem;">API Key hiện tại:</label>
+          <div id="set-key-masked" style="font-family: monospace; padding: 8px 12px; background: var(--bg-input); border-radius: 6px; border: 1px solid var(--border-color);"></div>
+        </div>
+
+        <div>
+          <label style="display: block; margin-bottom: 6px; font-size: 0.85rem;">Nhập API Key mới (Gemini API):</label>
+          <input type="password" id="set-new-key" placeholder="AIzaSy..." style="width: 100%;" />
+        </div>
+
+        <div style="display: flex; gap: 12px; align-items: center;">
+          <button id="btn-test-key" class="btn btn-secondary">🔍 Kiểm tra API Key</button>
+          <span id="key-test-status" style="font-size: 0.85rem;"></span>
+        </div>
+
+        <div>
+          <label style="display: block; margin-bottom: 6px; font-size: 0.85rem;">Model dịch thuật:</label>
+          <input type="text" id="set-model" value="gemini-2.5-flash" style="width: 100%;" />
+        </div>
+
+        <div>
+          <label style="display: block; margin-bottom: 6px; font-size: 0.85rem;">Giọng đọc Nam mặc định:</label>
+          <select id="set-male-voice" style="width: 100%;">
+            <option value="Minh Quân">Minh Quân (Nam Bắc)</option>
+            <option value="Gia Hưng">Gia Hưng (Nam Trung)</option>
+            <option value="Hồng Đăng">Hồng Đăng (Nam Nam)</option>
+          </select>
+        </div>
+
+        <div>
+          <label style="display: block; margin-bottom: 6px; font-size: 0.85rem;">Giọng đọc Nữ mặc định:</label>
+          <select id="set-female-voice" style="width: 100%;">
+            <option value="Quỳnh Anh">Quỳnh Anh (Nữ Bắc)</option>
+            <option value="Mai Phương">Mai Phương (Nữ Bắc)</option>
+            <option value="Bảo Ngọc">Bảo Ngọc (Nữ Nam)</option>
+            <option value="Thảo Ly">Thảo Ly (Nữ Nam)</option>
+          </select>
+        </div>
+
+        <button id="btn-save-settings" class="btn btn-success" style="align-self: flex-start;">💾 Lưu cài đặt</button>
+      </div>
+    </section>
+
+    <!-- TAB 5: HƯỚNG DẪN -->
+    <section id="tab-guide" class="tab-pane" style="padding: 24px;">
+      <div style="max-width: 750px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 24px; line-height: 1.6;">
+        <h3 style="color: #388bfd; margin-bottom: 12px;">📖 Hướng dẫn sử dụng DubStudio Pro</h3>
+        <p>1. <strong>Tạo tác vụ mới:</strong> Bấm nút <em>Bắt đầu Video mới</em> ở thanh trên cùng để chọn video và văn phong dịch AI.</p>
+        <p>2. <strong>Biên tập timeline:</strong> Ở nửa dưới màn hình, các khối giọng đọc/phụ đề có thể được kéo trượt tự do để dời mốc thời gian xuất hiện.</p>
+        <p>3. <strong>Đổi giọng & tốc độ:</strong> Ở danh sách bên phải, bác có thể đổi giọng và tốc độ riêng cho từng câu rồi bấm <em>Lưu & Đọc lại</em>.</p>
+        <p>4. <strong>Tùy chỉnh kiểu chữ:</strong> Thanh công cụ ngay dưới khung video cho phép chỉnh phông, cỡ chữ, màu sắc và vị trí hiển thị.</p>
+        <p>5. <strong>Trình chỉnh sửa:</strong> Tab <em>Trình chỉnh sửa</em> cho phép cắt khung (crop), tạo khối màu che chữ/watermark, và chèn logo ảnh lên video.</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- MODAL: TIỀN XỬ LÝ (TÙY CHỈNH VĂN PHONG & CHỌN GIỌNG TRƯỚC KHI CHẠY) -->
+  <div id="preprocess-modal" class="modal-backdrop">
+    <div class="modal-content">
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+        <h3 style="color: var(--text-bright); font-size: 1.05rem;">🎬 Bắt đầu Tác vụ Lồng tiếng Mới</h3>
+        <button id="btn-close-modal" style="background: none; border: none; color: var(--text-muted); font-size: 1.2rem; cursor: pointer;">&times;</button>
+      </div>
+
+      <div>
+        <label style="display: block; margin-bottom: 6px; font-size: 0.85rem;">Đường dẫn video (MP4):</label>
+        <input type="text" id="modal-video-path" placeholder="Nhập đường dẫn file video..." style="width: 100%;" />
+      </div>
+
+      <div>
+        <label style="display: block; margin-bottom: 6px; font-size: 0.85rem;">Văn phong dịch thuật AI (Tone/Style):</label>
+        <select id="modal-tone-select" style="width: 100%;">
+          <option value="Hài hước, dí dỏm, bắt trend giới trẻ">Hài hước, dí dỏm, bắt trend giới trẻ</option>
+          <option value="Tự nhiên, gần gũi, đời thường (Mặc định)" selected>Tự nhiên, gần gũi, đời thường (Mặc định)</option>
+          <option value="Nghiêm túc, phóng sự, thuyết minh tài liệu">Nghiêm túc, phóng sự, thuyết minh tài liệu</option>
+          <option value="Kiếm hiệp, cổ trang, truyền cảm">Kiếm hiệp, cổ trang, truyền cảm</option>
+          <option value="Ẩm thực, review sôi nổi">Ẩm thực, review sôi nổi</option>
+        </select>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+        <div>
+          <label style="display: block; margin-bottom: 6px; font-size: 0.85rem;">Giọng Nam ưu tiên:</label>
+          <select id="modal-male-voice" style="width: 100%;">
+            <option value="Minh Quân">Minh Quân (Bắc)</option>
+            <option value="Gia Hưng">Gia Hưng (Trung)</option>
+            <option value="Hồng Đăng">Hồng Đăng (Nam)</option>
+          </select>
+        </div>
+        <div>
+          <label style="display: block; margin-bottom: 6px; font-size: 0.85rem;">Giọng Nữ ưu tiên:</label>
+          <select id="modal-female-voice" style="width: 100%;">
+            <option value="Quỳnh Anh">Quỳnh Anh (Bắc)</option>
+            <option value="Mai Phương">Mai Phương (Bắc)</option>
+            <option value="Bảo Ngọc">Bảo Ngọc (Nam)</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px;">
+        <button id="btn-cancel-modal" class="btn btn-secondary">Hủy</button>
+        <button id="btn-confirm-start" class="btn btn-success">🚀 Bắt đầu xử lý lồng tiếng</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Tách câu thông minh bằng Enter -->
+  <div id="split-modal" class="modal-backdrop">
+    <div class="modal-content" style="max-width: 600px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <h3 id="split-modal-title" style="margin: 0; font-size: 1.1rem; color: var(--text-bright);">✂️ Tách câu thoại</h3>
+        <button id="btn-close-split-modal" style="background: none; border: none; font-size: 1.2rem; cursor: pointer; color: var(--text-muted);">&times;</button>
+      </div>
+      <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 10px;">
+        💡 <strong>Hướng dẫn:</strong> Trỏ chuột vào vị trí muốn tách và nhấn <strong>Enter</strong> để xuống hàng. Mỗi dòng sẽ trở thành một câu riêng biệt và được chia thời lượng theo tỉ lệ số từ.
+      </p>
+      <div style="margin-bottom: 12px;">
+        <label style="display: block; font-size: 0.8rem; margin-bottom: 4px; color: var(--text-muted);">Nội dung câu (Nhấn Enter để tách thành nhiều dòng):</label>
+        <textarea id="split-modal-textarea" rows="5" style="width: 100%; box-sizing: border-box; padding: 10px; font-size: 0.95rem; line-height: 1.5; background: var(--bg-dark); color: var(--text-bright); border: 1px solid var(--border); border-radius: 6px; resize: vertical;"></textarea>
+      </div>
+      <div id="split-modal-preview" style="background: rgba(255,255,255,0.03); border: 1px dashed var(--border); border-radius: 6px; padding: 10px; margin-bottom: 14px; font-size: 0.85rem;">
+        <!-- Dynamic parts preview -->
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button id="btn-cancel-split-modal" class="btn btn-secondary">Hủy</button>
+        <button id="btn-confirm-split" class="btn btn-success">✂️ Xác nhận tách câu</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
+

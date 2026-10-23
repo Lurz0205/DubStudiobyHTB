@@ -1,0 +1,35 @@
+[general]
+app_name = "dubstudio"
+models_dir = "models"
+workspace_dir = "workspace"
+out_dir = "out"
+
+[audio]
+sample_rate = 44100
+channels = 2
+
+[translation]
+provider = "gemini_web"
+model = "gemini_web"
+rate_limit_rpm = 30
+
+[tts]
+default_male_voice = "Hải Đăng"
+default_female_voice = "Trúc Ly"
+
+[asr]
+model_size = "sensevoice-small"
+vad_min_silence_duration_ms = 500
+split_silence_gap_s = 0.35
+max_segment_duration_s = 8.0
+
+[fit]
+max_speedup = 1.1
+min_slowdown = 0.9
+neutral_zone_low = 0.95
+neutral_zone_high = 1.05
+
+[render]
+encoder = "h264_nvenc"
+fallback_encoder = "libx264"
+crf = 18

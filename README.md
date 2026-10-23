@@ -188,4 +188,4 @@ ToolDichThuat/
 - Ứng dụng chỉ phục vụ mục đích biên dịch, học tập và sản xuất video cá nhân từ các tệp tin video nội bộ hợp pháp trên máy tính người dùng.
 
 ---
-*Phát triển bởi HTB — Phiên bản v1.0.0 Stable.*
+*Phát triển bởi đội ngũ DubStudio — Phiên bản v1.0.0 Stable.*

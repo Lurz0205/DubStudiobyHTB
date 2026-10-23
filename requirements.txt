@@ -1,0 +1,12 @@
+typer
+pydantic
+pydantic-settings
+rich
+pytest
+psutil
+nvidia-ml-py
+numpy
+soundfile
+python-dotenv
+httpx
+tqdm

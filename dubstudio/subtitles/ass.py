@@ -1,0 +1,476 @@
+"""Advanced SubStation Alpha (.ass) subtitle generator supporting Vietnamese typography."""
+import math
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+
+def format_ass_time(seconds: float) -> str:
+    """Format seconds into ASS timestamp format: H:MM:SS.cs"""
+    hrs = int(seconds // 3600)
+    mins = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    centis = int(round((seconds - int(seconds)) * 100))
+    if centis == 100:
+        secs += 1
+        centis = 0
+    return f"{hrs:d}:{mins:02d}:{secs:02d}.{centis:02d}"
+
+
+def wrap_balanced_lines(text: str, max_chars_per_line: int = 32) -> str:
+    """Wrap Vietnamese text into balanced lines using \\N for ASS, respecting max_chars_per_line."""
+    if "\n" in text:
+        parts = [wrap_balanced_lines(p, max_chars_per_line) for p in text.splitlines() if p.strip()]
+        return "\\N".join(parts)
+
+    words = text.strip().split()
+    if not words:
+        return ""
+
+    total_chars = len(text)
+    if total_chars <= max_chars_per_line:
+        return text
+
+    # Determine target number of lines
+    num_lines = max(2, round(total_chars / max_chars_per_line))
+    target_len = total_chars / num_lines
+    effective_max = max(max_chars_per_line, math.ceil(target_len))
+
+    lines = []
+    cur_line = []
+    cur_len = 0
+
+    for word in words:
+        potential_len = cur_len + (1 + len(word) if cur_line else len(word))
+        if cur_line and potential_len > effective_max and cur_len >= target_len * 0.75:
+            lines.append(" ".join(cur_line))
+            cur_line = [word]
+            cur_len = len(word)
+        else:
+            cur_line.append(word)
+            cur_len = potential_len
+
+    if cur_line:
+        lines.append(" ".join(cur_line))
+
+    return "\\N".join(lines)
+
+
+def hex_to_ass_color(hex_str: str, alpha: int = 0) -> str:
+    """Convert CSS hex color '#RRGGBB' or 'rgba(r,g,b,a)' to ASS color '&HAABBGGRR'."""
+    if not hex_str:
+        return f"&H{max(0, min(255, alpha)):02X}000000"
+    if hex_str.startswith("&H"):
+        return hex_str
+    if hex_str.startswith("rgba"):
+        import re
+        nums = re.findall(r"[\d.]+", hex_str)
+        if len(nums) >= 3:
+            r = int(float(nums[0]))
+            g = int(float(nums[1]))
+            b = int(float(nums[2]))
+            a_val = float(nums[3]) if len(nums) >= 4 else 1.0
+            ass_a = alpha if alpha > 0 else int(round((1.0 - a_val) * 255))
+            return f"&H{max(0, min(255, ass_a)):02X}{b:02X}{g:02X}{r:02X}"
+    hex_clean = hex_str.lstrip("#")
+    if len(hex_clean) == 6:
+        r, g, b = hex_clean[0:2], hex_clean[2:4], hex_clean[4:6]
+    elif len(hex_clean) == 3:
+        r, g, b = hex_clean[0]*2, hex_clean[1]*2, hex_clean[2]*2
+    else:
+        r, g, b = "FF", "FF", "FF"
+    a_hex = f"{max(0, min(255, alpha)):02X}"
+    return f"&H{a_hex}{b}{g}{r}"
+
+
+PUNCT_SPLIT_CHARS = set(".,!?:;—–…\"'”’")
+NATURAL_CONJUNCTIONS = {
+    "và", "nhưng", "mà", "nên", "thì", "rồi", "để", "bởi", "do", "vì",
+    "nếu", "tuy", "dù", "hoặc", "hay", "song", "đồng thời", "trong khi", "khi"
+}
+
+
+def split_subtitle_slices(
+    text: str,
+    start: float,
+    end: float,
+    target_words: int = 12,
+    max_words: int = 15,
+) -> List[Dict[str, Any]]:
+    """
+    Split a long subtitle sentence into clean display slices of ~10-15 words
+    prioritizing natural pauses (punctuation or conjunctions), allocating
+    duration proportionally based on word count without altering speech audio.
+    """
+    words = text.strip().split()
+    if not words:
+        return []
+    total_words = len(words)
+    if total_words <= max_words:
+        return [{"text": text.strip(), "start": start, "end": end}]
+
+    slices_words: List[List[str]] = []
+    cur = 0
+    while cur < total_words:
+        rem = total_words - cur
+        if rem <= max_words + 2:
+            if rem <= max_words:
+                slices_words.append(words[cur:])
+                break
+            else:
+                half = rem // 2
+                best_k = cur + half
+                best_score = -999.0
+                for k in range(cur + max(4, half - 3), min(total_words, cur + half + 4)):
+                    prev_w = words[k - 1]
+                    next_w = words[k].lower() if k < total_words else ""
+                    score = 0.0
+                    if any(prev_w.endswith(p) for p in PUNCT_SPLIT_CHARS):
+                        score += 8.0
+                    if next_w in NATURAL_CONJUNCTIONS:
+                        score += 5.0
+                    score -= abs(k - (cur + half)) * 0.5
+                    if score > best_score:
+                        best_score = score
+                        best_k = k
+                slices_words.append(words[cur:best_k])
+                slices_words.append(words[best_k:])
+                break
+        else:
+            min_k = cur + 8
+            max_k = min(total_words - 4, cur + max_words + 2)
+            if min_k >= max_k:
+                max_k = min(total_words, cur + max_words)
+                min_k = cur + max(1, target_words - 2)
+
+            target_k = cur + target_words
+            best_k = target_k
+            best_score = -999.0
+
+            for k in range(min_k, max_k + 1):
+                prev_w = words[k - 1]
+                next_w = words[k].lower() if k < total_words else ""
+                score = 0.0
+                if any(prev_w.endswith(p) for p in "?!."):
+                    score += 10.0
+                elif any(prev_w.endswith(p) for p in ",;:-—…"):
+                    score += 7.0
+                if next_w in NATURAL_CONJUNCTIONS:
+                    score += 5.0
+                score -= abs(k - target_k) * 0.6
+                if score > best_score:
+                    best_score = score
+                    best_k = k
+
+            slices_words.append(words[cur:best_k])
+            cur = best_k
+
+    total_dur = max(0.2, end - start)
+    result = []
+    running_start = start
+    for idx, sl in enumerate(slices_words):
+        if idx == len(slices_words) - 1:
+            sl_end = end
+        else:
+            sl_dur = round(total_dur * (len(sl) / total_words), 3)
+            sl_end = round(running_start + sl_dur, 3)
+            sl_end = min(sl_end, end - 0.1)
+            sl_end = max(sl_end, running_start + 0.1)
+
+        result.append({
+            "text": " ".join(sl),
+            "start": round(running_start, 3),
+            "end": round(sl_end, 3),
+        })
+        running_start = sl_end
+
+    return result
+
+
+def get_segment_slices(seg: Dict[str, Any], target_words: int = 12, max_words: int = 15) -> List[Dict[str, Any]]:
+    """
+    Resolve a subtitle segment into one or more timed slices.
+    Priority:
+    1. Explicit seg["sub_slices"] (created by user splitting sentence in Studio).
+    2. Multi-line vi_text separated by newlines (\\n).
+    3. Auto-split long sentences (>max_words words) via split_subtitle_slices.
+    4. Single slice covering the entire segment duration.
+    """
+    if seg.get("mute_sub"):
+        return []
+
+    if "vi_text" in seg:
+        raw_text = (seg.get("vi_text") or "").strip()
+    else:
+        raw_text = (seg.get("src_text") or "").strip()
+    if not raw_text:
+        return []
+
+    st = float(seg.get("start", 0.0))
+    en = float(seg.get("end", st + 1.0))
+    total_dur = max(0.2, en - st)
+
+    # 1. Explicit cues (from DP word-count splitting or manual edits)
+    cues = seg.get("cues")
+    if cues and isinstance(cues, list) and len(cues) > 0:
+        valid_cues = [c for c in cues if isinstance(c, dict) and c.get("text", "").strip()]
+        if valid_cues:
+            combined_cues = " ".join(c.get("text", "").strip() for c in valid_cues)
+            combined_raw = " ".join(raw_text.split())
+            if combined_cues == combined_raw:
+                return [{
+                    "text": c.get("text", "").strip(),
+                    "start": float(c.get("start", st)),
+                    "end": float(c.get("end", en)),
+                } for c in valid_cues]
+
+    # 2. Explicit sub_slices from studio
+    sub_slices = seg.get("sub_slices")
+    if sub_slices and isinstance(sub_slices, list) and len(sub_slices) > 0:
+        valid_slices = [s for s in sub_slices if isinstance(s, dict) and s.get("text", "").strip()]
+        if valid_slices:
+            word_counts = [max(1, len(sl.get("text", "").strip().split())) for sl in valid_slices]
+            total_w = sum(word_counts)
+            res = []
+            curr_t = st
+            for idx, (sl, wc) in enumerate(zip(valid_slices, word_counts), start=1):
+                if idx == len(valid_slices):
+                    seg_end = en
+                else:
+                    dur = round(total_dur * (wc / total_w), 2)
+                    seg_end = round(curr_t + dur, 2)
+                    seg_end = max(curr_t + 0.1, min(en - 0.1 * (len(valid_slices) - idx), seg_end))
+                res.append({
+                    "text": sl.get("text", "").strip(),
+                    "start": round(curr_t, 3),
+                    "end": round(seg_end, 3),
+                })
+                curr_t = seg_end
+            return res
+
+    # 2. Text containing newlines (\n)
+    if "\n" in raw_text:
+        lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+        if len(lines) > 1:
+            word_counts = [max(1, len(l.split())) for l in lines]
+            total_w = sum(word_counts)
+            res = []
+            curr_t = st
+            for idx, (l, wc) in enumerate(zip(lines, word_counts), start=1):
+                if idx == len(lines):
+                    seg_end = en
+                else:
+                    dur = round(total_dur * (wc / total_w), 2)
+                    seg_end = round(curr_t + dur, 2)
+                    seg_end = max(curr_t + 0.1, min(en - 0.1 * (len(lines) - idx), seg_end))
+                res.append({
+                    "text": l,
+                    "start": round(curr_t, 3),
+                    "end": round(seg_end, 3),
+                })
+                curr_t = seg_end
+            return res
+
+    # 3. Auto-slice long sentences
+    if len(raw_text.split()) > max_words:
+        return split_subtitle_slices(raw_text, st, en, target_words=target_words, max_words=max_words)
+
+    # 4. Single default slice
+    return [{
+        "text": raw_text,
+        "start": round(st, 3),
+        "end": round(en, 3),
+    }]
+
+
+def make_rounded_box_path(w: int, h: int, r: int) -> str:
+    """Generate an ASS drawing path with cubic bezier curves for smooth rounded corners."""
+    if r <= 0:
+        return f"m 0 0 l {w} 0 l {w} {h} l 0 {h}"
+    radius = min(r, w // 2, h // 2)
+    k = 0.5522847498 * radius
+    return (
+        f"m {int(radius)} 0 "
+        f"l {int(w - radius)} 0 "
+        f"b {int(round(w - radius + k))} 0 {w} {int(round(radius - k))} {w} {int(radius)} "
+        f"l {w} {int(h - radius)} "
+        f"b {w} {int(round(h - radius + k))} {int(round(w - radius + k))} {h} {int(w - radius)} {h} "
+        f"l {int(radius)} {h} "
+        f"b {int(round(radius - k))} {h} 0 {int(round(h - radius + k))} 0 {int(h - radius)} "
+        f"l 0 {int(radius)} "
+        f"b 0 {int(round(radius - k))} {int(round(radius - k))} 0 {int(radius)} 0"
+    )
+
+
+def generate_ass_subtitles(
+    segments_or_units: List[Dict[str, Any]],
+    output_path: Path,
+    title: str = "dubstudio Vietnamese Subtitles",
+    font_name: str = "Arial",
+    font_size: int = 24,
+    primary_color: str = "&H00FFFFFF",   # White (BGR)
+    outline_color: str = "&H00000000",   # Black (BGR)
+    outline_width: int = 2,
+    margin_v: int = 35,
+    video_width: int = 1280,
+    video_height: int = 720,
+    style: Optional[Dict[str, Any]] = None,
+) -> Path:
+    """Generate an ASS subtitle file formatted for clean typography and Vietnamese diacritics."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    box_width_pct = 85.0
+    box_mode = "full_width"
+    has_box = True
+    box_opacity = 0.6
+    box_radius = 6
+    raw_box_color = "#000000"
+    pos = "bottom"
+    align_mode = "center"
+
+    if style:
+        font_name = style.get("font_name") or font_name
+        font_size = int(style.get("font_size") or font_size)
+        outline_width = int(style.get("outline_width") or outline_width)
+        margin_v = int(style.get("margin_v") or margin_v)
+        if style.get("video_width"):
+            video_width = int(style["video_width"])
+        if style.get("video_height"):
+            video_height = int(style["video_height"])
+        if style.get("box_width_pct"):
+            box_width_pct = float(style["box_width_pct"])
+
+        box_mode = style.get("box_mode", "full_width") or "full_width"
+        has_box = bool(style.get("has_box", True))
+        box_opacity = float(style.get("box_opacity", 0.6) if style.get("box_opacity") is not None else 0.6)
+        box_radius = int(style.get("box_radius", 6) if style.get("box_radius") is not None else 6)
+        raw_box_color = style.get("box_color", "#000000") or "#000000"
+
+        if style.get("primary_color"):
+            primary_color = hex_to_ass_color(style["primary_color"])
+        if style.get("outline_color"):
+            outline_color = hex_to_ass_color(style["outline_color"])
+
+        pos = style.get("position", "bottom") or "bottom"
+        align_mode = style.get("text_align", "center") or "center"
+
+    # Base typography scale against reference 720p height so Fontsize in ASS (PlayResY) matches preview 1:1
+    ref_h = 720.0
+    scale_v = max(video_height, 360) / ref_h
+
+    # Adjustable box padding: horizontal (width) and vertical (height/length)
+    box_pad_x = float(style.get("box_padding_x", 14) if style and style.get("box_padding_x") is not None else 14)
+    box_pad_y = float(style.get("box_padding_y", 8) if style and style.get("box_padding_y") is not None else 8)
+
+    # Scaled dimensions in video pixel coordinates matching preview 1:1
+    ass_font_size = max(12, int(round(font_size * scale_v)))
+    ass_outline_width = max(1, int(round(outline_width * scale_v)))
+    ass_margin_v = max(5, int(round(margin_v * scale_v)))
+    ass_box_radius = max(0, int(round(box_radius * scale_v)))
+    ass_pad_x = max(4, int(round(box_pad_x * scale_v)))
+    ass_pad_y = max(2, int(round(box_pad_y * scale_v)))
+    box_opacity = max(0.0, min(1.0, box_opacity))
+    box_alpha = int(round(255 * (1.0 - box_opacity)))
+    alpha_hex = f"&H{box_alpha:02X}&"
+
+    clean_box_bgr = hex_to_ass_color(raw_box_color, alpha=0)[4:]
+    box_color_tag = f"&H{clean_box_bgr}&"
+
+    # Max line length for wrapping
+    box_w_ref = video_width * (box_width_pct / 100.0)
+    approx_char_width = max(8.0, ass_font_size * 0.52)
+    max_chars_per_line = max(12, int((box_w_ref - ass_font_size) / approx_char_width))
+
+    header = f"""[Script Info]
+; Script generated by dubstudio
+Title: {title}
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+YCbCr Matrix: None
+PlayResX: {video_width}
+PlayResY: {video_height}
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,{font_name},{ass_font_size},{primary_color},&H000000FF,{outline_color},&H00000000,-1,0,0,0,100,100,0,0,1,{ass_outline_width},0,5,0,0,0,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+    events = []
+    # Collect all slices and strictly eliminate time overlaps so next subtitle cleanly overrides previous subtitle
+    all_slices = []
+    for item in segments_or_units:
+        slices = get_segment_slices(item)
+        if slices:
+            all_slices.extend(slices)
+
+    all_slices.sort(key=lambda s: float(s.get("start", 0.0)))
+
+    for k, sl in enumerate(all_slices):
+        sl_start = float(sl.get("start", 0.0))
+        sl_end = float(sl.get("end", 0.0))
+        # Strictly truncate end time when overlapping with next subtitle
+        if k + 1 < len(all_slices):
+            next_start = float(all_slices[k + 1].get("start", 0.0))
+            if sl_end > next_start:
+                sl_end = max(sl_start + 0.05, next_start)
+
+        sl_text = sl.get("text", "")
+        start_str = format_ass_time(sl_start)
+        end_str = format_ass_time(sl_end)
+        wrapped_text = wrap_balanced_lines(sl_text, max_chars_per_line=max_chars_per_line)
+        lines = wrapped_text.split(r"\N")
+        lines_count = len(lines)
+        text_h = int(round(ass_font_size * 0.88 + max(0, lines_count - 1) * (ass_font_size * 1.16)))
+        box_h = text_h + int(round(ass_pad_y * 2))
+
+        if has_box and box_mode == "wrap_text":
+            max_line_len = max(len(l.strip()) for l in lines)
+            approx_text_w = int(round(max_line_len * ass_font_size * 0.54))
+            box_w = min(int(round(video_width * 0.95)), approx_text_w + ass_pad_x * 2)
+            box_w = max(box_w, int(round(ass_font_size * 3.5)))
+        else:
+            box_w = int(round(video_width * (box_width_pct / 100.0)))
+
+        box_left = int(round((video_width - box_w) / 2.0))
+        if style and style.get("pos_y_pct") is not None:
+            pct = float(style["pos_y_pct"])
+            box_top = max(0, min(video_height - box_h, int(round(video_height * (pct / 100.0)))))
+        elif pos == "top":
+            box_top = ass_margin_v
+        elif pos == "center":
+            box_top = int(round((video_height - box_h) / 2.0))
+        else:  # "bottom"
+            box_top = int(round(video_height - ass_margin_v - box_h))
+
+        cx = int(round(box_left + box_w / 2.0))
+        cy = int(round(box_top + box_h / 2.0 - ass_font_size * 0.04))
+
+        if align_mode == "left":
+            tx = int(round(box_left + ass_font_size * 0.8))
+            text_override = f"{{\\pos({tx},{cy})\\an4\\b1}}"
+        elif align_mode == "right":
+            tx = int(round(box_left + box_w - ass_font_size * 0.8))
+            text_override = f"{{\\pos({tx},{cy})\\an6\\b1}}"
+        else:  # "center"
+            text_override = f"{{\\pos({cx},{cy})\\an5\\b1}}"
+
+        if has_box:
+            path = make_rounded_box_path(box_w, box_h, ass_box_radius)
+            bg_line = (
+                f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,"
+                f"{{\\pos({box_left},{box_top})\\an7\\bord0\\shad0\\1c{box_color_tag}\\1a{alpha_hex}\\p1}}"
+                f"{path}{{\\p0}}"
+            )
+            events.append(bg_line)
+            text_line = f"Dialogue: 1,{start_str},{end_str},Default,,0,0,0,,{text_override}{wrapped_text}"
+            events.append(text_line)
+        else:
+            text_line = f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{text_override}{wrapped_text}"
+            events.append(text_line)
+
+    full_content = header + "\n".join(events) + "\n"
+    output_path.write_text(full_content, encoding="utf-8")
+    return output_path
