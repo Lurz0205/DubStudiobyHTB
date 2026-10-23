@@ -15,13 +15,15 @@
   - Hỗ trợ tải tự động trọn gói cho `whisper_large_v3` & `sensevoice_small` qua HuggingFace Hub snapshot.
   - 140/140 unit tests pass 100% (`pytest tests/ -q`). Rebuild `dist\DubStudio\DubStudio.exe` hoàn tất, selftest code 0 (Commit `eb21870`).
 - **Giai đoạn 4 & Bản phát hành v1.1.0 (Beta Release):**
-  - Khắc phục triệt để `[WinError 10013]` qua `WindowsSelectorEventLoopPolicy`, chặn lỗi socketpair của Proactor loop.
+  - Khắc phục triệt để `[WinError 10013]` qua `WindowsSelectorEventLoopPolicy` & `asyncio.new_event_loop()` riêng trong thread uvicorn, loại bỏ lỗi socketpair/Proactor.
+  - Pre-flight Model Gate: Kiểm tra tính sẵn sàng thực tế của `model.pt` (>100MB), chặn ngay từ UI nếu đang tải dở hoặc chưa tải, loại bỏ hoàn toàn hiện tượng trọng số ngẫu nhiên sinh text ảo.
+  - Khóa tải đơn tiến trình toàn cục (`_GLOBAL_DOWNLOADING_LOCK`): Triệt tiêu nguy cơ tải trùng lặp hoặc xung đột đa tiến trình khi người dùng tương tác liên tục.
   - Quét mô hình chọn lọc: chỉ bắt tải ASR đang cấu hình làm việc, tự động nhắc khi đổi mô hình; quét toàn diện Torch, VieNeu, FFmpeg.
   - Tải streaming 256KB trực tiếp vào thư mục tạm `.staging_*`, hủy tức thì <0.1s, dọn sạch rác khi tắt/mở app.
   - Chống lỗi `RuntimeError: QProgressBar deleted` khi bấm làm mới, cập nhật tại chỗ (*in-place*).
   - Tự động chuyển tab Cài đặt và kích hoạt tải ngay khi bấm "✓ Tải ngay" trên popup cập nhật.
   - Nâng cấp phiên bản lên `v1.1.0`, kiểm toán máy khách sạch qua `sim_user_machine.ps1` (Code 0, Selftest OK).
-  - Đạt 145/145 unit tests passed (100%). Sẵn sàng đẩy GitHub Actions Azure đóng gói Velopack phát hành Release.
+  - Đạt 145/145 unit tests passed (100%). Đẩy commit `6435f96` và Tag `v1.1.0` lên GitHub Actions Azure để tự động đóng gói Velopack.
 
 ## Tiếp theo (Next)
-- Theo dõi GitHub Actions Azure tự động đóng gói `DubStudio-win-Setup.exe` và gắn Release `v1.1.0`.
+- Chờ GitHub Actions Azure Run #9 hoàn tất build `DubStudio-win-Setup.exe` và xuất bản chính thức vào Release `v1.1.0`.

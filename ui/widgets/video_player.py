@@ -872,10 +872,6 @@ class VideoPlayerWidget(QWidget):
             self._stop_all_audio_tracks()
             return
 
-        self._multi_track_active = True
-        self._audio_output.setMuted(True)
-        self._audio_output.setVolume(0.0)
-
         # Store volumes immediately
         self.set_vi_voice_volume(vi_voice_vol)
         self.set_orig_bgm_volume(orig_bgm_vol)
@@ -886,6 +882,21 @@ class VideoPlayerWidget(QWidget):
         fast_vi = (ws / "voice_raw.wav") if (ws / "voice_raw.wav").exists() else ((ws / "voice_track.wav") if (ws / "voice_track.wav").exists() else None)
         fast_bgm = (ws / "bgm_effective.wav") if (ws / "bgm_effective.wav").exists() else ((ws / "audio" / "bgm.wav") if (ws / "audio" / "bgm.wav").exists() else None)
         fast_voc = (ws / "audio" / "vocals.wav") if (ws / "audio" / "vocals.wav").exists() else ((ws / "audio" / "orig.wav") if (ws / "audio" / "orig.wav").exists() else None)
+        has_custom = bool(custom_bgm_path and Path(custom_bgm_path).exists())
+
+        has_any_stem = bool(fast_vi or fast_bgm or fast_voc or has_custom)
+        if not has_any_stem:
+            # Brand new video or project with no separated audio stems yet:
+            # Play original native video audio through _audio_output at full volume!
+            self._multi_track_active = False
+            self._audio_output.setMuted(False)
+            self._audio_output.setVolume(1.0)
+            self._stop_all_audio_tracks()
+            return
+
+        self._multi_track_active = True
+        self._audio_output.setMuted(True)
+        self._audio_output.setVolume(0.0)
 
         if fast_vi:
             self._vi_voice_path = str(fast_vi.resolve())
@@ -925,6 +936,9 @@ class VideoPlayerWidget(QWidget):
             return
 
         if not res or not self._multi_track_active:
+            if not self._multi_track_active:
+                self._audio_output.setMuted(False)
+                self._audio_output.setVolume(1.0)
             return
 
         pos = self._player.position()

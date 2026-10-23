@@ -158,16 +158,15 @@ jobs:
             "User-Agent" = "GitHub-Actions-Velopack"
           }
           try {
-            $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" -Headers $headers
-            if ($rel -and $rel.assets) {
-              foreach ($asset in $rel.assets) {
-                Write-Host "Deleting conflicting asset: $($asset.name) (ID: $($asset.id))..."
-                Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/${{ github.repository }}/releases/assets/$($asset.id)" -Headers $headers
+            $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases" -Headers $headers
+            foreach ($rel in $releases) {
+              if ($rel.tag_name -eq $tag) {
+                Write-Host "Found existing release for $tag (ID: $($rel.id), Draft: $($rel.draft)). Deleting to avoid asset conflicts..."
+                Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/${{ github.repository }}/releases/$($rel.id)" -Headers $headers
               }
-              Write-Host "All conflicting assets removed successfully."
             }
           } catch {
-            Write-Host "Release $tag does not exist or has no conflicting assets."
+            Write-Host "No conflicting releases found: $_"
           }
 
       - name: Upload Packages to GitHub Release
