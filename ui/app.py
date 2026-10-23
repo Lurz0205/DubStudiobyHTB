@@ -142,21 +142,17 @@ def main():
 
     if not is_api_healthy(port):
         print(f"[DubStudio] Starting background API service (FastAPI) on port {port}...")
+        loop_factory = "asyncio:SelectorEventLoop" if sys.platform == "win32" else "auto"
         cfg = uvicorn.Config(
             "dubstudio.api.app:app",
             host="127.0.0.1",
             port=port,
+            loop=loop_factory,
             log_level="error",
             log_config=None,
             access_log=False,
         )
         def _run_server():
-            import asyncio
-            if sys.platform == "win32":
-                try:
-                    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-                except Exception:
-                    pass
             try:
                 srv = uvicorn.Server(cfg)
                 srv.run()

@@ -1,6 +1,8 @@
 """Safely push source code to GitHub main branch via GitHub Git Data API."""
 import base64
+import hashlib
 import os
+import time
 from pathlib import Path
 import dotenv
 import requests
@@ -36,13 +38,23 @@ if ref_resp.status_code != 200:
 parent_commit_sha = ref_resp.json()["object"]["sha"]
 print(f"Current main commit: {parent_commit_sha[:7]}", flush=True)
 
-# 2. Get tree of current commit
+# 2. Get tree of current commit to identify unchanged files
 commit_resp = session.get(f"{api_base}/git/commits/{parent_commit_sha}")
 base_tree_sha = commit_resp.json()["tree"]["sha"]
 
-# 3. Collect files to upload
+tree_fetch_resp = session.get(f"{api_base}/git/trees/{base_tree_sha}?recursive=1")
+remote_files_map = {}
+if tree_fetch_resp.status_code == 200:
+    for item in tree_fetch_resp.json().get("tree", []):
+        if item.get("type") == "blob":
+            remote_files_map[item["path"]] = item["sha"]
+
+# 3. Collect files and filter to ONLY changed files
 excluded_dirs = {'.venv', 'models', 'workspace', 'out', 'samples', '__pycache__', 'dist', 'build', 'bin', '.pytest_cache', '.git'}
 excluded_files = {'.env', 'scratch_analyze.py', 'release_manifest.json'}
+
+def calc_git_sha(content_bytes: bytes) -> str:
+    return hashlib.sha1(b"blob " + str(len(content_bytes)).encode("ascii") + b"\x00" + content_bytes).hexdigest()
 
 files_to_push = []
 for root, dirs, files in os.walk('.'):
@@ -52,45 +64,59 @@ for root, dirs, files in os.walk('.'):
             continue
         p = Path(root) / f
         rel = p.relative_to('.').as_posix()
-        files_to_push.append((rel, p))
+        content = p.read_bytes()
+        local_sha = calc_git_sha(content)
+        if remote_files_map.get(rel) != local_sha:
+            files_to_push.append((rel, p, content, local_sha))
 
-print(f"Total files to push: {len(files_to_push)}", flush=True)
+print(f"Total changed files to upload: {len(files_to_push)}", flush=True)
+for rel, _, _, _ in files_to_push:
+    print(f"  * {rel}", flush=True)
 
-# 4. Create blobs
+if not files_to_push:
+    print("Khong co file nao thay doi so voi commit tren GitHub!", flush=True)
+
+# 4. Create blobs for changed files only
 tree_items = []
-for idx, (rel_path, local_path) in enumerate(files_to_push, 1):
-    content_bytes = local_path.read_bytes()
+for idx, (rel_path, local_path, content_bytes, _) in enumerate(files_to_push, 1):
     b64_content = base64.b64encode(content_bytes).decode("utf-8")
     
-    blob_resp = session.post(
-        f"{api_base}/git/blobs",
-        json={"content": b64_content, "encoding": "base64"},
-    )
-    if blob_resp.status_code != 201:
+    blob_sha = None
+    for attempt in range(3):
+        blob_resp = session.post(
+            f"{api_base}/git/blobs",
+            json={"content": b64_content, "encoding": "base64"},
+        )
+        if blob_resp.status_code == 201:
+            blob_sha = blob_resp.json()["sha"]
+            break
+        time.sleep(1.0)
+        
+    if not blob_sha:
         print(f"Failed to create blob for {rel_path}: {blob_resp.status_code} {blob_resp.text}", flush=True)
         exit(1)
         
-    blob_sha = blob_resp.json()["sha"]
     tree_items.append({
         "path": rel_path,
         "mode": "100644",
         "type": "blob",
         "sha": blob_sha,
     })
-    if idx % 10 == 0 or idx == len(files_to_push):
-        print(f"  -> Uploaded: {idx}/{len(files_to_push)} files...", flush=True)
+    print(f"  -> Uploaded blob: {rel_path} ({idx}/{len(files_to_push)})", flush=True)
 
-# 5. Create new tree
-tree_resp = session.post(
-    f"{api_base}/git/trees",
-    json={"base_tree": base_tree_sha, "tree": tree_items},
-)
-if tree_resp.status_code != 201:
-    print("Failed to create tree:", tree_resp.status_code, tree_resp.text, flush=True)
-    exit(1)
-
-new_tree_sha = tree_resp.json()["sha"]
-print(f"Created new tree: {new_tree_sha[:7]}", flush=True)
+# 5. Create new tree (overlaying changes on top of base_tree)
+if tree_items:
+    tree_resp = session.post(
+        f"{api_base}/git/trees",
+        json={"base_tree": base_tree_sha, "tree": tree_items},
+    )
+    if tree_resp.status_code != 201:
+        print("Failed to create tree:", tree_resp.status_code, tree_resp.text, flush=True)
+        exit(1)
+    new_tree_sha = tree_resp.json()["sha"]
+    print(f"Created new tree: {new_tree_sha[:7]}", flush=True)
+else:
+    new_tree_sha = base_tree_sha
 
 # 6. Create commit
 commit_payload = {
