@@ -167,6 +167,7 @@ def get_subprocess_kwargs() -> dict:
     if sys.platform == "win32":
         import subprocess
         kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        kwargs["stdin"] = subprocess.DEVNULL
         si = subprocess.STARTUPINFO()
         si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         si.wShowWindow = 0  # SW_HIDE
