@@ -154,18 +154,24 @@ def main():
         tut_dlg = WelcomeTutorialDialog(win)
         tut_dlg.exec()
 
-    # In packaged mode only: check GPU hardware and component updates
+    # In packaged mode only: check GPU hardware and component updates asynchronously in background
     from dubstudio.packaging import is_packaged
     if is_packaged():
-        from ui.dialogs.gpu_prompt import check_and_prompt_gpu_if_packaged
-        check_and_prompt_gpu_if_packaged(win)
+        from PyQt6.QtCore import QTimer
+        def _check_bg_status():
+            try:
+                from ui.dialogs.gpu_prompt import check_and_prompt_gpu_if_packaged
+                check_and_prompt_gpu_if_packaged(win)
 
-        from dubstudio.components import check_for_component_updates
-        from ui.dialogs.component_update_dialog import ComponentUpdateDialog
-        updates = check_for_component_updates()
-        if updates:
-            up_dlg = ComponentUpdateDialog(updates[0], parent=win)
-            up_dlg.exec()
+                from dubstudio.components import check_for_component_updates
+                from ui.dialogs.component_update_dialog import ComponentUpdateDialog
+                updates = check_for_component_updates()
+                if updates:
+                    up_dlg = ComponentUpdateDialog(updates[0], parent=win)
+                    up_dlg.exec()
+            except Exception:
+                pass
+        QTimer.singleShot(2000, _check_bg_status)
 
     print("[DubStudio] Ready!")
     sys.exit(app.exec())

@@ -40,7 +40,10 @@ Pipeline: local video import -> audio extraction -> vocal/BGM separation -> ASR 
 - R11. After each working milestone: update PROGRESS.md (<= 30 lines: done / next / open issues).
 - R12. Strictly stick to assigned tasks. Do not expand scope.
 - R13. UI Icons: NEVER embed Unicode emojis in button labels, tabs, or text. Always use SVG vector icons via `ui/icons.py` (`btn.setIcon(get_icon(name, color))` or `set_button_icon(btn, name, text)`). Button labels must be plain text.
-- R14. Packaging & Releases: Use a 2-tier architecture (isolate heavy AI/CUDA wheels and model weights into downloadable components, keeping base app release assets well within GitHub's 2 GB limit). Package with Velopack (`vpk`) on channel `win` as `DubStudio-win-Setup.exe`. When re-publishing to an existing tag, delete old assets on GitHub before uploading to avoid duplicate-name conflicts. Packaged mode (`is_packaged() == True`) must be self-contained and never reference dev `.venv`; all background subprocesses must use `get_subprocess_env()` and `get_subprocess_kwargs()` (`CREATE_NO_WINDOW` / `SW_HIDE`).
+- R14. Packaging & Releases: Quy trình đóng gói và phát hành:
+  (1) Sau khi sửa code và kiểm thử xong (`pytest tests/ -q`), dùng `scripts/push_code_to_github.py` để đẩy mã nguồn lên GitHub `main`.
+  (2) GitHub Actions (`.github/workflows/build_release.yml`) trên Azure tự động build, package bằng Velopack (`vpk pack --noPortable`), và gắn release (`Setup.exe`, `full.nupkg`, `delta.nupkg`) trực tiếp trên mây. Tuyệt đối không upload file nặng từ máy local qua WiFi chập chờn.
+  (3) Packaged mode (`is_packaged() == True`) phải độc lập, không tham chiếu dev `.venv`. Kiểm thử máy người dùng bằng `scripts/sim_user_machine.ps1`. Mọi subprocess chạy ngầm phải dùng `get_subprocess_env()` và `get_subprocess_kwargs()` (`CREATE_NO_WINDOW` / `SW_HIDE`).
 
 ## 4. Environment (fixed facts)
 

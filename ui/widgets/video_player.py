@@ -894,13 +894,22 @@ class VideoPlayerWidget(QWidget):
             return boosted
         try:
             import subprocess
+            from dubstudio.paths import resolve_tool
+            from dubstudio.packaging import get_subprocess_kwargs, get_subprocess_env
+            ffmpeg_exe = resolve_tool("ffmpeg")
             cmd = [
-                "ffmpeg", "-y",
+                ffmpeg_exe, "-y",
                 "-i", str(raw_p),
                 "-filter:a", "compand=attacks=0.01:decays=0.1:points=-90/-90|-40/-25|-20/-6|0/0:gain=10,alimiter=limit=0.98:attack=5:release=50",
                 str(boosted.resolve()),
             ]
-            res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            res = subprocess.run(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=get_subprocess_env(),
+                **get_subprocess_kwargs(),
+            )
             if res.returncode == 0 and boosted.exists():
                 return boosted
         except Exception:
