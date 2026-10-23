@@ -108,7 +108,9 @@ def detect_nvidia_gpu_smi() -> Optional[Dict[str, str | int | float]]:
     return None
 
 
-def inspect_gpu_and_driver(min_driver: str = MIN_NVIDIA_DRIVER_VERSION) -> Dict[str, any]:
+_CACHED_GPU_INSPECTION = None
+
+def inspect_gpu_and_driver(min_driver: str = MIN_NVIDIA_DRIVER_VERSION, force_refresh: bool = False) -> Dict[str, any]:
     """
     Perform complete GPU inspection and classify into one of the 4 standard states:
     - NO_NVIDIA
@@ -116,12 +118,16 @@ def inspect_gpu_and_driver(min_driver: str = MIN_NVIDIA_DRIVER_VERSION) -> Dict[
     - VRAM_LOW
     - OK_CUDA
     """
+    global _CACHED_GPU_INSPECTION
+    if _CACHED_GPU_INSPECTION is not None and not force_refresh:
+        return dict(_CACHED_GPU_INSPECTION)
+
     info = detect_nvidia_gpu_nvml()
     if not info:
         info = detect_nvidia_gpu_smi()
 
     if not info:
-        return {
+        res = {
             "status": GPUStatus.NO_NVIDIA,
             "card_name": "Không tìm thấy card NVIDIA",
             "vram_mb": 0,
@@ -130,13 +136,15 @@ def inspect_gpu_and_driver(min_driver: str = MIN_NVIDIA_DRIVER_VERSION) -> Dict[
             "min_driver_required": min_driver,
             "recommended_mode": "cpu",
         }
+        _CACHED_GPU_INSPECTION = res
+        return res
 
     card_name = str(info["name"])
     vram_mb = int(info["vram_mb"])
     driver_ver = str(info["driver_version"])
 
     if not driver_ver or not is_driver_compatible(driver_ver, min_driver):
-        return {
+        res = {
             "status": GPUStatus.DRIVER_OUTDATED_OR_MISSING,
             "card_name": card_name,
             "vram_mb": vram_mb,
@@ -145,9 +153,11 @@ def inspect_gpu_and_driver(min_driver: str = MIN_NVIDIA_DRIVER_VERSION) -> Dict[
             "min_driver_required": min_driver,
             "recommended_mode": "cpu",
         }
+        _CACHED_GPU_INSPECTION = res
+        return res
 
     if vram_mb < 3800:  # Under 4GB threshold
-        return {
+        res = {
             "status": GPUStatus.VRAM_LOW,
             "card_name": card_name,
             "vram_mb": vram_mb,
@@ -156,8 +166,10 @@ def inspect_gpu_and_driver(min_driver: str = MIN_NVIDIA_DRIVER_VERSION) -> Dict[
             "min_driver_required": min_driver,
             "recommended_mode": "cpu",
         }
+        _CACHED_GPU_INSPECTION = res
+        return res
 
-    return {
+    res = {
         "status": GPUStatus.OK_CUDA,
         "card_name": card_name,
         "vram_mb": vram_mb,
@@ -165,4 +177,7 @@ def inspect_gpu_and_driver(min_driver: str = MIN_NVIDIA_DRIVER_VERSION) -> Dict[
         "driver_version": driver_ver,
         "min_driver_required": min_driver,
         "recommended_mode": "cuda",
+    }
+    _CACHED_GPU_INSPECTION = res
+    return res
     }
