@@ -59,7 +59,46 @@ def is_api_healthy(port: int = 8765) -> bool:
         return False
 
 
+def setup_global_exception_handler():
+    """Install global sys.excepthook to prevent silent crash and log tracebacks to app.log."""
+    def _handle_exception(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+
+        import logging
+        import traceback
+        tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+        logging.error(f"Unhandled Exception in GUI thread:\n{tb_str}")
+        print(f"[Unhandled Exception] {tb_str}", file=sys.stderr)
+
+        try:
+            from PyQt6.QtWidgets import QApplication, QMessageBox
+            if QApplication.instance():
+                box = QMessageBox()
+                box.setIcon(QMessageBox.Icon.Critical)
+                box.setWindowTitle("DubStudio - Thông báo sự cố")
+                box.setText("Đã xảy ra lỗi không mong muốn trong ứng dụng.")
+                box.setInformativeText(str(exc_value))
+                box.setDetailedText(tb_str)
+                box.exec()
+        except Exception:
+            pass
+
+    sys.excepthook = _handle_exception
+
+
 def main():
+    # Install global exception hook immediately
+    setup_global_exception_handler()
+
+    # Initialize Windows Job Object with KILL_ON_JOB_CLOSE (Kernel-level process tree isolation)
+    try:
+        from dubstudio.win_job import init_job_object
+        init_job_object()
+    except Exception as e:
+        print(f"[DubStudio] Job Object initialization notice: {e}")
+
     # Force UTF-8 stdout on Windows console (or devnull if windowed)
     if sys.stdout is None:
         sys.stdout = open(os.devnull, "w", encoding="utf-8")

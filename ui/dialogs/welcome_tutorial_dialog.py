@@ -481,26 +481,32 @@ class WelcomeTutorialDialog(QDialog):
         whisper_choice = self._selected_whisper_model
         provider_choice = "gemini_web" if self._rb_gemini.isChecked() else "manual"
 
-        # Apply settings asynchronously or directly via API
-        try:
-            import requests
-            payload = {
-                "whisper_model": whisper_choice,
-                "translation_provider": provider_choice,
-            }
-            requests.post("http://127.0.0.1:8765/api/settings", json=payload, timeout=5)
-        except Exception:
-            # Fallback to direct .env persistence
+        # Apply settings asynchronously in background thread
+        payload = {
+            "whisper_model": whisper_choice,
+            "translation_provider": provider_choice,
+        }
+        def _bg_apply():
             try:
-                from pathlib import Path
-                env_p = Path(".env")
-                content = env_p.read_text(encoding="utf-8") if env_p.exists() else ""
-                lines = [l for l in content.splitlines() if not l.startswith("WHISPER_MODEL=") and not l.startswith("TRANSLATION_PROVIDER=")]
-                lines.append(f"WHISPER_MODEL={whisper_choice}")
-                lines.append(f"TRANSLATION_PROVIDER={provider_choice}")
-                env_p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                from dubstudio.config import get_api_base_url
+                from ui.workers import get_shared_session
+                sess = get_shared_session()
+                sess.post(f"{get_api_base_url()}/api/settings", json=payload, timeout=5)
             except Exception:
-                pass
+                # Fallback to direct .env persistence
+                try:
+                    from pathlib import Path
+                    env_p = Path(".env")
+                    content = env_p.read_text(encoding="utf-8") if env_p.exists() else ""
+                    lines = [l for l in content.splitlines() if not l.startswith("WHISPER_MODEL=") and not l.startswith("TRANSLATION_PROVIDER=")]
+                    lines.append(f"WHISPER_MODEL={whisper_choice}")
+                    lines.append(f"TRANSLATION_PROVIDER={provider_choice}")
+                    env_p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                except Exception:
+                    pass
+
+        import threading
+        threading.Thread(target=_bg_apply, daemon=True).start()
 
         if self._chk_dont_show.isChecked():
             mark_first_run_done(True)

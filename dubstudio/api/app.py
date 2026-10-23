@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from dubstudio.config import AppConfig
 from dubstudio.errors import DubError
 from dubstudio.events import add_event_listener, emit_event, remove_event_listener
-from dubstudio.jobstate import JobContext
+from dubstudio.jobstate import JobContext, atomic_write_json
 from dubstudio.stages import (
     analyze,
     asr,
@@ -229,6 +229,11 @@ def get_tts_worker() -> subprocess.Popen:
                 env=get_subprocess_env(),
                 **get_subprocess_kwargs(),
             )
+            try:
+                from dubstudio.win_job import assign_process_to_job
+                assign_process_to_job(_tts_worker_proc)
+            except Exception:
+                pass
             _api_logger.info("Starting warm TTS worker process...")
             ready_data = None
             for _ in range(60):
@@ -483,6 +488,11 @@ def _run_pipeline_worker(job_id: str, video_path: Path, subtitles_only: bool = F
             env=env,
             **get_subprocess_kwargs(),
         )
+        try:
+            from dubstudio.win_job import assign_process_to_job
+            assign_process_to_job(proc)
+        except Exception:
+            pass
 
         output_lines = []
         for line in proc.stdout:
@@ -1002,7 +1012,7 @@ def update_segment(job_id: str, seg_id: int, req: UpdateSegmentRequest):
         if req.keep_original is not None:
             target_seg["keep_original"] = req.keep_original
 
-        seg_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(seg_file, data, indent=2)
 
     if req.voice_start is not None:
         _quick_rebuild_voice_track(job_id)
@@ -1056,7 +1066,7 @@ def batch_update_segments(job_id: str, req: BatchUpdateSegmentsRequest):
                     target["keep_original"] = bool(item["keep_original"])
                 updated_count += 1
 
-        seg_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(seg_file, data, indent=2)
 
     if req.rebuild_audio:
         _quick_rebuild_voice_track(job_id)
@@ -1120,7 +1130,7 @@ def create_segment(job_id: str, req: CreateSegmentRequest):
     segments.sort(key=lambda s: s.get("start", 0))
     data["segments"] = segments
 
-    seg_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_json(seg_file, data, indent=2)
     return {"status": "created", "segment": new_seg}
 
 
@@ -1148,7 +1158,7 @@ def delete_segment(job_id: str, seg_id: int):
         raise HTTPException(status_code=404, detail=f"Không tìm thấy đoạn thoại {seg_id}")
 
     data["segments"] = new_segments
-    seg_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_json(seg_file, data, indent=2)
 
     # Remove audio file if exists
     wav_path = ws_dir / "tts" / f"{seg_id:04d}.wav"
@@ -1176,7 +1186,7 @@ def batch_delete_segments(job_id: str, req: BatchDeleteSegmentsRequest):
         segments = data.get("segments", [])
         new_segments = [s for s in segments if s.get("id") not in to_del]
         data["segments"] = new_segments
-        seg_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(seg_file, data, indent=2)
 
     tts_dir = ws_dir / "tts"
     if tts_dir.exists():
@@ -1256,7 +1266,7 @@ def merge_segments(job_id: str, req: MergeSegmentsRequest):
     new_segments = [s for s in segments if s["id"] not in other_ids]
     data["segments"] = new_segments
 
-    seg_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_json(seg_file, data, indent=2)
     return {"status": "merged", "segment": base_seg}
 
 
@@ -1362,7 +1372,7 @@ def split_segment(job_id: str, req: SplitSegmentRequest, seg_id: Optional[int] =
         segments.insert(target_idx + 1 + offset, ns)
 
     data["segments"] = segments
-    seg_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_json(seg_file, data, indent=2)
     return {"status": "split", "part1": orig_seg, "part2": new_segments[0], "segments": [orig_seg] + new_segments}
 
 
@@ -1480,7 +1490,7 @@ def regenerate_segment_tts(job_id: str, seg_id: int, req: Optional[RegenTTSReque
         target_seg["tts_dur"] = dur
         target_seg["tts_file"] = f"tts/{seg_id:04d}.wav"
         target_seg["tts_hash"] = exp_hash
-        seg_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(seg_file, data, indent=2)
 
     # Automatically update voice track so video preview reflects new audio immediately
     _quick_rebuild_voice_track(job_id)
@@ -1602,7 +1612,7 @@ def save_subtitle_style(job_id: str, req: SubtitleStyleRequest):
     ws_dir.mkdir(parents=True, exist_ok=True)
     style_file = ws_dir / "style.json"
     dumped = req.model_dump()
-    style_file.write_text(json.dumps(dumped, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_json(style_file, dumped, indent=2)
 
     # Persist mix settings (4 audio tracks)
     mix_file = ws_dir / "mix_settings.json"
@@ -1613,21 +1623,18 @@ def save_subtitle_style(job_id: str, req: SubtitleStyleRequest):
     orig_vol = req.orig_voice_volume if req.orig_voice_volume is not None else 0.00
     vi_vol = req.vi_voice_volume if req.vi_voice_volume is not None else 1.00
 
-    mix_file.write_text(
-        json.dumps(
-            {
-                "orig_bgm_volume": orig_bgm_vol,
-                "bgm_volume": orig_bgm_vol,
-                "custom_bgm_path": custom_bgm,
-                "custom_bgm_volume": custom_bgm_vol,
-                "include_orig_voice": include_orig,
-                "orig_voice_volume": orig_vol,
-                "vi_voice_volume": vi_vol,
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
+    atomic_write_json(
+        mix_file,
+        {
+            "orig_bgm_volume": orig_bgm_vol,
+            "bgm_volume": orig_bgm_vol,
+            "custom_bgm_path": custom_bgm,
+            "custom_bgm_volume": custom_bgm_vol,
+            "include_orig_voice": include_orig,
+            "orig_voice_volume": orig_vol,
+            "vi_voice_volume": vi_vol,
+        },
+        indent=2,
     )
 
     return {"status": "saved", "style": dumped}
@@ -1653,7 +1660,7 @@ def render_job_video(job_id: str):
             if "stages" in state_data:
                 state_data["stages"].pop("render", None)
                 state_data["stages"].pop("mix", None)
-                state_file.write_text(json.dumps(state_data, ensure_ascii=False, indent=2), encoding="utf-8")
+                atomic_write_json(state_file, state_data, indent=2)
         except Exception:
             pass
 

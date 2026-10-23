@@ -26,7 +26,7 @@ from ui.icons import get_icon
 from ui.theme import COLORS
 from ui.widgets.subtitle_editor import MALE_VOICES, FEMALE_VOICES
 from ui.workers import LoadSettingsWorker, SaveSettingsWorker
-import requests
+from dubstudio.config import get_api_base_url
 
 
 AVAILABLE_TRANSLATION_MODELS = [
@@ -434,7 +434,7 @@ class SettingsPage(QWidget):
                 self._lbl_status.setText(f"Đang nghe mẫu giọng: {voice_name}")
                 return
 
-            url = f"http://127.0.0.1:8765/api/voices/preview?voice={voice_name}"
+            url = f"{get_api_base_url()}/api/voices/preview?voice={voice_name}"
             self._preview_player.setSource(QUrl(url))
             self._preview_player.play()
         except Exception as e:

@@ -29,8 +29,8 @@ def get_shared_session() -> requests.Session:
 
 def get_base_url() -> str:
     """Return local API base URL using active dynamic port."""
-    port = os.environ.get("DUBSTUDIO_API_PORT", "8765")
-    return f"http://127.0.0.1:{port}"
+    from dubstudio.config import get_api_base_url
+    return get_api_base_url()
 
 
 def _request_with_retry(method: str, path: str, data: Optional[dict] = None, timeout: int = 60) -> Any:
@@ -52,6 +52,11 @@ def _request_with_retry(method: str, path: str, data: Optional[dict] = None, tim
             else:
                 raise ValueError(f"Unsupported method: {method}")
 
+            if r.status_code in (500, 502, 503, 504) and attempt < 3:
+                import time
+                time.sleep(0.25 * (attempt + 1))
+                continue
+
             if r.status_code >= 400:
                 try:
                     err_data = r.json()
@@ -70,7 +75,7 @@ def _request_with_retry(method: str, path: str, data: Optional[dict] = None, tim
                 time.sleep(0.15 * (attempt + 1))
             else:
                 raise RuntimeError(
-                    "Không thể kết nối đến dịch vụ nền DubStudio (127.0.0.1:8765). "
+                    f"Không thể kết nối đến dịch vụ nền DubStudio ({get_base_url()}). "
                     "Hệ thống đang bận hoặc đang khởi động, vui lòng thử lại sau giây lát."
                 ) from ex
         except Exception:

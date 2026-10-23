@@ -2,9 +2,33 @@
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from dubstudio.errors import DubError
+
+
+def atomic_write_json(path: Path | str, data: Any, indent: int = 2) -> None:
+    """Safely write data to a JSON file atomically using a temporary file and atomic replace.
+    
+    Guarantees that interrupted writes or crashes never leave a corrupted or 0-byte file on disk.
+    """
+    p = Path(path).resolve()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = p.with_suffix(f"{p.suffix}.tmp_{os.getpid()}_{id(data)}")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=indent)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, p)
+    except Exception:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except Exception:
+                pass
+        raise
 
 
 def compute_file_hash(path: Path) -> str:
@@ -51,8 +75,7 @@ class JobContext:
             self.state_data = {"stages": {}}
 
     def save_state(self) -> None:
-        with open(self.state_file, "w", encoding="utf-8") as f:
-            json.dump(self.state_data, f, ensure_ascii=False, indent=2)
+        atomic_write_json(self.state_file, self.state_data, indent=2)
 
     def is_stage_done(self, stage_name: str, input_hash: str) -> bool:
         """Check if stage was already completed with identical input hash and existing outputs."""

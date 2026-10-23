@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 from typing import Optional
-import requests
 
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QColor, QDesktopServices
@@ -218,22 +217,7 @@ class ManualTranslateDialog(QDialog):
             return
 
         self._submitted = True
-        try:
-            r = requests.post(
-                f"http://127.0.0.1:8765/api/jobs/{self._job_id}/manual-translate",
-                json={"text": text, "cancelled": False},
-                timeout=10,
-            )
-            r.raise_for_status()
-        except Exception as e:
-            # Fallback to direct workspace file writing
-            try:
-                from pathlib import Path
-                ws_f = Path("workspace") / self._job_id / "manual_translate_response.json"
-                ws_f.write_text(json.dumps({"text": text, "cancelled": False}, ensure_ascii=False, indent=2), encoding="utf-8")
-            except Exception:
-                pass
-
+        self._send_response_async({"text": text, "cancelled": False})
         self.accept()
 
     def _on_cancel(self):
@@ -246,16 +230,28 @@ class ManualTranslateDialog(QDialog):
         super().closeEvent(event)
 
     def _notify_cancellation(self):
-        try:
-            requests.post(
-                f"http://127.0.0.1:8765/api/jobs/{self._job_id}/manual-translate",
-                json={"cancelled": True},
-                timeout=5,
-            )
-        except Exception:
+        self._send_response_async({"cancelled": True})
+
+    def _send_response_async(self, payload: dict):
+        def _bg():
+            from dubstudio.config import get_api_base_url
+            from dubstudio.paths import get_workspace_dir
+            from dubstudio.jobstate import atomic_write_json
             try:
-                from pathlib import Path
-                ws_f = Path("workspace") / self._job_id / "manual_translate_response.json"
-                ws_f.write_text(json.dumps({"cancelled": True}, ensure_ascii=False, indent=2), encoding="utf-8")
+                from ui.workers import get_shared_session
+                sess = get_shared_session()
+                r = sess.post(
+                    f"{get_api_base_url()}/api/jobs/{self._job_id}/manual-translate",
+                    json=payload,
+                    timeout=5,
+                )
+                r.raise_for_status()
             except Exception:
-                pass
+                try:
+                    ws_f = get_workspace_dir() / self._job_id / "manual_translate_response.json"
+                    atomic_write_json(ws_f, payload)
+                except Exception:
+                    pass
+
+        import threading
+        threading.Thread(target=_bg, daemon=True).start()

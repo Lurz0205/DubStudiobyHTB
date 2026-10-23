@@ -1,10 +1,21 @@
 """Configuration management for dubstudio using Pydantic Settings and TOML."""
 from pathlib import Path
 from typing import Any, Dict, Optional
+import os
 import tomllib
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from dubstudio.paths import get_models_dir, get_workspace_dir, get_out_dir, get_app_dir
+
+
+def get_api_port() -> int:
+    """Return the active HTTP port for DubStudio FastAPI backend."""
+    return int(os.environ.get("DUBSTUDIO_API_PORT", "8765"))
+
+
+def get_api_base_url() -> str:
+    """Return the base URL of the local FastAPI backend (e.g. http://127.0.0.1:8765)."""
+    return f"http://127.0.0.1:{get_api_port()}"
 
 
 class GeneralConfig(BaseModel):
