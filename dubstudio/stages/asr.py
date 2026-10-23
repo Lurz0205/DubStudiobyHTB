@@ -259,9 +259,9 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
             total_duration = round(info.duration, 2)
 
         # Save asr.json with full word details
+        from dubstudio.jobstate import atomic_write_json
         asr_file = job.workspace / "asr.json"
-        with open(asr_file, "w", encoding="utf-8") as f:
-            json.dump(refined_segments, f, ensure_ascii=False, indent=2)
+        atomic_write_json(asr_file, refined_segments, indent=2)
 
         # Initialize segments.json conforming to Data Contract
         segments_data = {
@@ -270,12 +270,10 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
             "segments": refined_segments,
         }
         segments_file = job.workspace / "segments.json"
-        with open(segments_file, "w", encoding="utf-8") as f:
-            json.dump(segments_data, f, ensure_ascii=False, indent=2)
+        atomic_write_json(segments_file, segments_data, indent=2)
 
         emit_event(stage_name, 100.0, f"Nhận dạng hoàn tất: {len(refined_segments)} đoạn thoại")
         job.finish_stage(stage_name, ["asr.json", "segments.json"])
-
 
     except Exception as e:
         job.fail_stage(stage_name, str(e))
@@ -285,3 +283,12 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
             hint_vi="Kiểm tra driver card đồ họa hoặc chuyển compute_type sang CPU.",
             details={"error": str(e)},
         )
+    finally:
+        import gc
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass

@@ -13,8 +13,7 @@ def run_command(args: List[str], description: str = "lệnh") -> subprocess.Comp
     if args:
         args[0] = resolve_tool(args[0])
 
-    from dubstudio.packaging import get_subprocess_env, get_subprocess_kwargs
-    sub_kwargs = get_subprocess_kwargs()
+    from dubstudio.packaging import get_subprocess_env, safe_subprocess_run
     sub_env = get_subprocess_env()
 
     # Isolate working directory to tool binary folder to prevent DLL search collisions (0xc0000142)
@@ -22,7 +21,7 @@ def run_command(args: List[str], description: str = "lệnh") -> subprocess.Comp
     tool_cwd = str(tool_bin.parent.resolve()) if tool_bin.exists() else None
 
     try:
-        result = subprocess.run(
+        result = safe_subprocess_run(
             args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -32,7 +31,6 @@ def run_command(args: List[str], description: str = "lệnh") -> subprocess.Comp
             check=False,
             env=sub_env,
             cwd=tool_cwd,
-            **sub_kwargs,
         )
     except FileNotFoundError as e:
         raise DubError(

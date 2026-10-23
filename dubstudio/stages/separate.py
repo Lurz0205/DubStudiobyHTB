@@ -143,7 +143,7 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
     else:
         models_dir.mkdir(parents=True, exist_ok=True)
 
-    from dubstudio.packaging import get_runtime_python, get_subprocess_env, get_subprocess_kwargs
+    from dubstudio.packaging import get_runtime_python, get_subprocess_env, safe_subprocess_run
     cmd = [
         str(get_runtime_python()),
         "-m", "dubstudio.stages.separate",
@@ -155,7 +155,7 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
 
     emit_event(stage_name, 20.0, f"Đang nạp mô hình tách nhạc {sep_model}...")
     try:
-        proc = subprocess.run(
+        proc = safe_subprocess_run(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -164,7 +164,6 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
             errors="replace",
             check=False,
             env=get_subprocess_env(),
-            **get_subprocess_kwargs(),
         )
 
         if proc.returncode != 0:
@@ -178,6 +177,15 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
     except Exception as e:
         job.fail_stage(stage_name, str(e))
         raise
+    finally:
+        import gc
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
 
     if not vocals_dest.exists() or not bgm_dest.exists():
         raise DubError(

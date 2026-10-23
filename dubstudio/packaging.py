@@ -2,6 +2,7 @@
 from __future__ import annotations
 import os
 from pathlib import Path
+import subprocess
 import sys
 
 
@@ -178,6 +179,36 @@ def get_subprocess_kwargs() -> dict:
         si.wShowWindow = 0  # SW_HIDE
         kwargs["startupinfo"] = si
     return kwargs
+
+
+def safe_subprocess_popen(cmd: list[str], **kwargs) -> subprocess.Popen:
+    """Launch a subprocess safely with Windows Job Object attachment and hidden window flags."""
+    sub_kwargs = get_subprocess_kwargs()
+    sub_kwargs.update(kwargs)
+    proc = subprocess.Popen(cmd, **sub_kwargs)
+    try:
+        from dubstudio.win_job import assign_process_to_job
+        assign_process_to_job(proc)
+    except Exception:
+        pass
+    return proc
+
+
+def safe_subprocess_run(cmd: list[str], check: bool = False, **kwargs) -> subprocess.CompletedProcess:
+    """Run a subprocess to completion with Windows Job Object attachment and hidden window flags."""
+    sub_kwargs = get_subprocess_kwargs()
+    sub_kwargs.update(kwargs)
+    proc = subprocess.Popen(cmd, **sub_kwargs)
+    try:
+        from dubstudio.win_job import assign_process_to_job
+        assign_process_to_job(proc)
+    except Exception:
+        pass
+    stdout, stderr = proc.communicate()
+    retcode = proc.poll()
+    if check and retcode != 0:
+        raise subprocess.CalledProcessError(retcode, cmd, output=stdout, stderr=stderr)
+    return subprocess.CompletedProcess(cmd, retcode, stdout, stderr)
 
 
 def ensure_runtime_paths() -> None:

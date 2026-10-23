@@ -166,8 +166,10 @@ def run(job: JobContext, cfg: AppConfig, input_video: Path, force: bool = False)
             ]
 
         has_voice = voice_track.exists() and voice_track.stat().st_size > 500
+        from dubstudio.paths import resolve_tool
+        from dubstudio.packaging import get_subprocess_env, safe_subprocess_run
         cmd = [
-            "ffmpeg", "-y",
+            resolve_tool("ffmpeg"), "-y",
             "-i", str(input_video.resolve()),
         ]
         if has_voice:
@@ -188,13 +190,14 @@ def run(job: JobContext, cfg: AppConfig, input_video: Path, force: bool = False)
 
         emit_event(stage_name, 50.0, f"Đang kết xuất video và khắc phụ đề ASS ({encoder})...")
 
-        proc = subprocess.run(
+        proc = safe_subprocess_run(
             cmd,
             cwd=str(job.workspace.resolve()),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
             check=False,
+            env=get_subprocess_env(),
         )
 
         if proc.returncode == 0:

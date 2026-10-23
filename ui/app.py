@@ -213,8 +213,8 @@ def main():
                 pass
         QTimer.singleShot(2000, _check_bg_status)
 
-    # Install GUI Freeze Watchdog (records exact stack trace if Main Thread freezes > 0.5s)
-    def start_gui_freeze_watchdog(threshold_sec=0.5):
+    # Install GUI Freeze Watchdog (records exact stack trace if Main Thread freezes > 1.2s, 0% CPU at idle)
+    def start_gui_freeze_watchdog(threshold_sec=1.2):
         from dubstudio.paths import get_logs_dir
         log_file = get_logs_dir() / "gui_freeze_dump.log"
         main_thread_id = threading.main_thread().ident
@@ -222,14 +222,14 @@ def main():
 
         from PyQt6.QtCore import QTimer
         w_timer = QTimer()
-        w_timer.setInterval(100)
+        w_timer.setInterval(250)
         w_timer.timeout.connect(lambda: last_heartbeat.__setitem__(0, time.perf_counter()))
         w_timer.start()
 
         def watchdog_loop():
             import traceback
             while True:
-                time.sleep(0.2)
+                time.sleep(0.3)
                 elapsed = time.perf_counter() - last_heartbeat[0]
                 if elapsed > threshold_sec:
                     frames = sys._current_frames()
@@ -248,7 +248,7 @@ def main():
         t.start()
         return w_timer
 
-    _freeze_watchdog_timer = start_gui_freeze_watchdog(threshold_sec=0.5)
+    _freeze_watchdog_timer = start_gui_freeze_watchdog(threshold_sec=1.2)
 
     print("[DubStudio] Ready!")
     sys.exit(app.exec())

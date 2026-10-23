@@ -460,6 +460,10 @@ class TrimVideoRequest(BaseModel):
 def _run_pipeline_worker(job_id: str, video_path: Path, subtitles_only: bool = False, dub_only: bool = False) -> None:
     global _active_job_id
     try:
+        # Stage Mutex on 4GB VRAM: Release persistent TTS worker before starting heavy separation/ASR stages
+        if not dub_only:
+            stop_tts_worker()
+
         from dubstudio.packaging import get_runtime_python, get_subprocess_env, get_subprocess_kwargs
         py_exe = str(get_runtime_python().resolve())
 

@@ -991,7 +991,7 @@ class VideoPlayerWidget(QWidget):
 
     @staticmethod
     def _ensure_boosted_track(raw_path: Optional[Path]) -> Optional[Path]:
-        """Pre-generate or cache 200% (+10.5 dB RMS broadcast companded) audio track."""
+        """Pre-generate or cache 200% (+10.5 dB RMS broadcast companded) audio track safely."""
         if not raw_path or not Path(raw_path).exists():
             return None
         raw_p = Path(raw_path).resolve()
@@ -999,25 +999,29 @@ class VideoPlayerWidget(QWidget):
         if boosted.exists() and boosted.stat().st_mtime >= raw_p.stat().st_mtime and boosted.stat().st_size > 44:
             return boosted
         try:
-            import subprocess
+            import os
             from dubstudio.paths import resolve_tool
-            from dubstudio.packaging import get_subprocess_kwargs, get_subprocess_env
+            from dubstudio.packaging import get_subprocess_env, safe_subprocess_run
             ffmpeg_exe = resolve_tool("ffmpeg")
+            tmp_boosted = raw_p.parent / f"voice_boosted_200.tmp_{os.getpid()}.wav"
             cmd = [
                 ffmpeg_exe, "-y",
                 "-i", str(raw_p),
                 "-filter:a", "compand=attacks=0.01:decays=0.1:points=-90/-90|-40/-25|-20/-6|0/0:gain=10,alimiter=limit=0.98:attack=5:release=50",
-                str(boosted.resolve()),
+                str(tmp_boosted.resolve()),
             ]
-            res = subprocess.run(
+            res = safe_subprocess_run(
                 cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 env=get_subprocess_env(),
-                **get_subprocess_kwargs(),
             )
-            if res.returncode == 0 and boosted.exists():
-                return boosted
+            if res.returncode == 0 and tmp_boosted.exists():
+                try:
+                    os.replace(tmp_boosted, boosted)
+                    return boosted
+                except Exception:
+                    return tmp_boosted
         except Exception:
             pass
         return raw_p
@@ -1168,6 +1172,19 @@ class VideoPlayerWidget(QWidget):
         self.pause()
         self._player.setSource(QUrl())
         self._stop_all_audio_tracks()
+        # Clean up any leftover temporary preview wav files
+        if getattr(self, "_job_id", None):
+            try:
+                from dubstudio.paths import resolve_job_workspace
+                ws = resolve_job_workspace(self._job_id)
+                if ws.exists():
+                    for tmp_f in ws.glob("**/*.tmp*"):
+                        try:
+                            tmp_f.unlink()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
         self._video_path = None
         self._duration = 0.0
         self._time_label.setText("0:00.0 / 0:00.0")

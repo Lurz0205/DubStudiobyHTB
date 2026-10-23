@@ -372,11 +372,15 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
         mix_inputs.append("[passthrough]")
         input_idx += 1
 
+    from dubstudio.paths import resolve_tool
+    from dubstudio.packaging import get_subprocess_env, safe_subprocess_run
+    ffmpeg_exe = resolve_tool("ffmpeg")
+
     if len(mix_inputs) > 1:
         amix_chain = "".join(mix_inputs)
         filter_complex = f"{';'.join(filter_parts)};{amix_chain}amix=inputs={len(mix_inputs)}:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.98:attack=5:release=50[out]"
         cmd = [
-            "ffmpeg", "-y",
+            ffmpeg_exe, "-y",
             *inputs,
             "-filter_complex", filter_complex,
             "-map", "[out]",
@@ -386,7 +390,7 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
         ]
     else:
         cmd = [
-            "ffmpeg", "-y",
+            ffmpeg_exe, "-y",
             *inputs,
             "-filter:a", vi_filter if vi_voice_volume > 1.001 else f"aformat=channel_layouts=stereo,aresample=48000,volume={vi_voice_volume:.2f},alimiter=limit=0.98:attack=5:release=50",
             "-ac", "2",
@@ -395,13 +399,13 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
         ]
 
     try:
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=True)
+        safe_subprocess_run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=True, env=get_subprocess_env())
     except subprocess.CalledProcessError as e:
         raise DubError(
             code="MIX_FAILED",
             user_message_vi="Lỗi khi hòa trộn âm thanh bằng ffmpeg.",
             hint_vi="Kiểm tra các tệp audio trung gian trong workspace.",
-            details={"stderr": e.stderr.decode("utf-8", errors="replace")[-300:]},
+            details={"stderr": (e.stderr.decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else str(e.stderr))[-300:]},
         )
 
     # Automatically generate preview_dubbed.mp4 for instant desktop preview with audio
@@ -423,12 +427,11 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
                 "-b:a", "192k",
                 str(preview_mp4.resolve()),
             ]
-            subprocess.run(
+            safe_subprocess_run(
                 prev_cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 env=get_subprocess_env(),
-                **get_subprocess_kwargs(),
             )
         except Exception:
             pass
