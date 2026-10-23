@@ -162,6 +162,10 @@ def sync_installed_components() -> Dict[str, Dict[str, Any]]:
                     "status": "ready",
                 }
                 changed = True
+        else:
+            if pkg_id in installed:
+                del installed[pkg_id]
+                changed = True
 
     if changed:
         save_installed_components(installed)
@@ -317,7 +321,7 @@ def is_component_ready(pkg_id: str) -> Tuple[bool, str]:
             Path("models/audio-separator/Kim_Vocal_2.onnx"),
             Path("models/Kim_Vocal_2.onnx"),
         ]
-        if any(c.exists() for c in candidates):
+        if any(c.is_file() and c.stat().st_size > 1024 * 1024 for c in candidates):
             return True, "Đã sẵn sàng"
 
     if pkg_id == "bs_roformer":
@@ -327,7 +331,7 @@ def is_component_ready(pkg_id: str) -> Tuple[bool, str]:
             Path("models/audio-separator/model_bs_roformer_ep_317_sdr_12.9755.ckpt"),
             Path("models/model_bs_roformer_ep_317_sdr_12.9755.ckpt"),
         ]
-        if any(c.exists() for c in candidates):
+        if any(c.is_file() and c.stat().st_size > 1024 * 1024 for c in candidates):
             return True, "Đã sẵn sàng"
 
     if pkg_id == "sensevoice_small":
@@ -336,8 +340,18 @@ def is_component_ready(pkg_id: str) -> Tuple[bool, str]:
             models_dir / "hf" / "hub" / "models--FunAudioLLM--SenseVoiceSmall",
             Path("models/SenseVoiceSmall"),
         ]
-        if any(c.exists() for c in candidates):
-            return True, "Đã sẵn sàng"
+        for c in candidates:
+            if c.is_dir():
+                has_weights = (
+                    (c / "model.pt").exists()
+                    or (c / "model.onnx").exists()
+                    or (c / "config.yaml").exists()
+                    or any(c.glob("snapshots/*/*model*"))
+                    or any(c.glob("*model*"))
+                )
+                if has_weights:
+                    return True, "Đã sẵn sàng"
+        return False, "Chưa tải"
 
     if pkg_id == "whisper_large_v3":
         candidates = [
@@ -346,8 +360,17 @@ def is_component_ready(pkg_id: str) -> Tuple[bool, str]:
             Path("models/faster-whisper-large-v3"),
             Path("models/models--Systran--faster-whisper-large-v3"),
         ]
-        if any(c.exists() for c in candidates):
-            return True, "Đã sẵn sàng"
+        for c in candidates:
+            if c.is_dir():
+                has_weights = (
+                    (c / "model.bin").exists()
+                    or (c / "model.safetensors").exists()
+                    or any(c.glob("snapshots/*/*model*"))
+                    or any(c.glob("*.bin"))
+                )
+                if has_weights:
+                    return True, "Đã sẵn sàng"
+        return False, "Chưa tải"
 
     if pkg_id == "vieneu_tts_voices":
         candidates = [
@@ -386,8 +409,10 @@ def is_component_ready(pkg_id: str) -> Tuple[bool, str]:
         raw_p = str(entry["path"]).strip()
         if raw_p:
             path = Path(raw_p)
-            if path.exists():
-                return True, "Sẵn sàng"
+            if path.is_file() and path.stat().st_size > 0:
+                return True, "Đã sẵn sàng"
+            if path.is_dir() and any(path.iterdir()):
+                return True, "Đã sẵn sàng"
 
     return False, "Chưa tải"
 

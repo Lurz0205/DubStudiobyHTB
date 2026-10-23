@@ -10,7 +10,9 @@
   - Stage Mutex trên 4GB VRAM: giải phóng persistent TTS worker trước khi chạy `separate`/`asr`, gọi `gc.collect()` + `torch.cuda.empty_cache()` sau mỗi stage nặng.
   - Chống lỗi `WinError 32`: ghi audio preview qua file tạm + replace nguyên tử, tự động dọn dẹp file `.tmp` khi đóng job (`video_player.py`).
   - Tối ưu đóng gói: chặn `modelscope`, `funasr`, `torch`... trong `DubStudio.spec`, đưa Watchdog về nhịp 250ms (0% CPU khi app nghỉ).
-  - 139/139 unit tests pass 100% (`pytest tests/ -q`). Đã đóng gói lại `dist\DubStudio\DubStudio.exe`, selftest code 0, đã push GitHub `main` (commit `cf158b9`).
+  - Khắc phục trạng thái mô hình: kiểm tra vật lý tệp mô hình trên đĩa (`components.py`), tự động dọn bản ghi rác trong `installed.json`.
+  - Tự động quét cập nhật & mô hình mỗi lần mở app (`StartupCheckWorker`, `check_all_updates`).
+  - 140/140 unit tests pass 100% (`pytest tests/ -q`). Rebuild `dist\DubStudio\DubStudio.exe` hoàn tất, selftest code 0.
 
 ## Tiếp theo (Next)
 - Người dùng kiểm tra trực tiếp trên bản build mới nhất `dist\DubStudio\DubStudio.exe`.

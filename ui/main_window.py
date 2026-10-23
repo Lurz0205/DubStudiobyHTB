@@ -260,6 +260,10 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+        # Auto-check updates and verify components on startup
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(1500, self._start_startup_update_check)
+
     def _on_cta_create_project(self):
         """Action when clicking '+ Tạo dự án mới' on sidebar."""
         self._on_nav_clicked(0)
@@ -417,6 +421,42 @@ class MainWindow(QMainWindow):
             "Kiểm tra cập nhật",
             f"Bạn đang sử dụng phiên bản mới nhất (v{CURRENT_VERSION})!\nToàn bộ các gói thành phần AI đều sẵn sàng.",
         )
+
+    def _start_startup_update_check(self):
+        """Run startup scan for updates and missing components in background."""
+        try:
+            from ui.workers import StartupCheckWorker
+            self._startup_worker = StartupCheckWorker()
+            self._startup_worker.finished.connect(self._on_startup_check_finished)
+            self._startup_worker.start()
+        except Exception:
+            pass
+
+    def _on_startup_check_finished(self, res: dict):
+        """Handle startup check results cleanly without blocking the user."""
+        if not res:
+            return
+
+        # Refresh settings page if present to reflect newly verified components
+        if hasattr(self, "_settings_page") and hasattr(self._settings_page, "_render_components_ui"):
+            try:
+                self._settings_page._render_components_ui()
+            except Exception:
+                pass
+
+        has_app = res.get("has_app_update", False)
+        comp_updates = res.get("component_updates", [])
+        missing = res.get("missing_components", [])
+
+        if has_app:
+            latest = res.get("latest_version")
+            self.status_bar.showMessage(f"● Đã có phiên bản mới v{latest}. Mở Cài đặt để cập nhật.")
+        elif comp_updates:
+            self.status_bar.showMessage(f"● Có {len(comp_updates)} bản cập nhật mô hình AI. Mở Cài đặt để cập nhật.")
+        elif missing:
+            self.status_bar.showMessage(f"● Lưu ý: Có {len(missing)} mô hình chưa tải. Vào Cài đặt để tải gói cần dùng.")
+        else:
+            self.status_bar.showMessage("● Sẵn sàng làm việc (Toàn bộ mô hình đã cập nhật).")
 
     def _on_tutorial_clicked(self):
         """Display the Onboarding & Whisper Model Comparison Tutorial."""

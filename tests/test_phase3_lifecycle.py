@@ -53,3 +53,31 @@ def test_winerror32_file_replacement_guard(tmp_path: Path):
     os.replace(tmp_file, orig_file)
     assert orig_file.exists()
     assert orig_file.read_bytes() == b"RIFF" + b"\x01" * 100
+
+
+def test_components_physical_verification_and_sync(monkeypatch, tmp_path):
+    """Verify is_component_ready returns False for nonexistent models and sync prunes ghost records."""
+    from dubstudio.components import is_component_ready, sync_installed_components, get_installed_components, save_installed_components
+
+    fake_comp_dir = tmp_path / "components"
+    fake_comp_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("dubstudio.components.get_components_dir", lambda: fake_comp_dir)
+    monkeypatch.setattr("dubstudio.components.get_installed_components_file", lambda: fake_comp_dir / "installed.json")
+
+    # Seed installed.json with ghost records that do not exist physically
+    fake_installed = {
+        "sensevoice_small": {"version": 1},
+        "whisper_large_v3": {"version": 1},
+    }
+    save_installed_components(fake_installed)
+
+    # Physical verification must fail for nonexistent SenseVoice / Whisper in empty tmp
+    ready, msg = is_component_ready("sensevoice_small")
+    assert not ready
+    assert msg == "Chưa tải"
+
+    # Sync must prune ghost records
+    synced = sync_installed_components()
+    assert "sensevoice_small" not in synced
+    assert "whisper_large_v3" not in synced
+

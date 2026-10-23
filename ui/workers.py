@@ -610,3 +610,17 @@ class DownloadComponentWorker(QThread):
             self.error.emit(pkg_id, str(e))
 
 
+class StartupCheckWorker(QThread):
+    """Scan physical components on disk, sync installed.json, and check for updates."""
+    finished = pyqtSignal(dict)
+
+    def run(self):
+        try:
+            from dubstudio.updater import check_all_updates
+            res = check_all_updates()
+            self.finished.emit(res)
+        except Exception:
+            self.finished.emit({})
+
+
+

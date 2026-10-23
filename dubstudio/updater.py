@@ -37,6 +37,7 @@ def check_all_updates() -> Dict[str, Any]:
         "release_notes": "",
         "download_url": "",
         "component_updates": [],
+        "missing_components": [],
     }
 
     # 1. GitHub app version
@@ -51,10 +52,22 @@ def check_all_updates() -> Dict[str, Any]:
 
     # 2. Components
     try:
-        from dubstudio.components import sync_installed_components
+        from dubstudio.components import (
+            sync_installed_components,
+            check_for_component_updates,
+            fetch_components_manifest,
+            is_component_ready,
+        )
         sync_installed_components()
         comp_updates = check_for_component_updates()
         result["component_updates"] = comp_updates or []
+
+        manifest = fetch_components_manifest()
+        for pkg in manifest.get("packages", []):
+            if pkg.get("required"):
+                ready, _ = is_component_ready(pkg["id"])
+                if not ready:
+                    result["missing_components"].append(pkg)
     except Exception:
         pass
 
