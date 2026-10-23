@@ -453,7 +453,7 @@ class VideoPlayerWidget(QWidget):
             | QPainter.RenderHint.SmoothPixmapTransform
             | QPainter.RenderHint.TextAntialiasing
         )
-        self._view.setStyleSheet("background-color: #0c0d10; border-radius: 8px; border: 1px solid #21242c;")
+        self._view.setStyleSheet("background-color: #000000; border-radius: 10px; border: 1px solid #262C3A;")
         layout.addWidget(self._view, 1)
 
         # Canvas background item for aspect-ratio padding preview (9:16, 1:1, etc.)
@@ -495,20 +495,23 @@ class VideoPlayerWidget(QWidget):
         self._container_filter = VideoContainerFilter(self)
         self._view.viewport().installEventFilter(self._container_filter)
 
-        # Controls bar
-        ctrl = QHBoxLayout()
-        ctrl.setContentsMargins(4, 0, 4, 4)
-        ctrl.setSpacing(6)
+        # Controls bar container card
+        ctrl_card = QFrame()
+        ctrl_card.setObjectName("player_control_card")
+        ctrl_card.setStyleSheet("background-color: #171B26; border: 1px solid #262C3A; border-radius: 8px; padding: 2px 6px;")
+        ctrl = QHBoxLayout(ctrl_card)
+        ctrl.setContentsMargins(6, 4, 6, 4)
+        ctrl.setSpacing(8)
 
         self._play_btn = QPushButton()
-        self._play_btn.setIcon(get_icon("play", "#9ca3af", "#38bdf8", 14))
-        self._play_btn.setObjectName("icon_btn")
+        self._play_btn.setIcon(get_icon("play", "#FFFFFF", "#FFFFFF", 14))
+        self._play_btn.setObjectName("primary")
         self._play_btn.setFixedSize(32, 28)
         self._play_btn.clicked.connect(self.toggle_play)
         ctrl.addWidget(self._play_btn)
 
         self._time_label = QLabel("0:00.0 / 0:00.0")
-        self._time_label.setObjectName("status_label")
+        self._time_label.setStyleSheet("color: #94A3B8; font-size: 11.5px; font-weight: 500;")
         self._time_label.setFixedWidth(130)
         ctrl.addWidget(self._time_label)
 
@@ -521,14 +524,14 @@ class VideoPlayerWidget(QWidget):
 
         # Audio volume toggle
         self._vol_btn = QPushButton()
-        self._vol_btn.setIcon(get_icon("zap", "#38bdf8", "#38bdf8", 14))
+        self._vol_btn.setIcon(get_icon("zap", "#6366F1", "#6366F1", 14))
         self._vol_btn.setObjectName("icon_btn")
         self._vol_btn.setFixedSize(28, 28)
         self._vol_btn.setToolTip("Âm thanh: 100% (bấm để tắt/bật tiếng)")
         self._vol_btn.clicked.connect(self._toggle_mute)
         ctrl.addWidget(self._vol_btn)
 
-        layout.addLayout(ctrl)
+        layout.addWidget(ctrl_card)
 
     def _toggle_mute(self):
         is_muted = self._vi_voice_audio.isMuted() if self._multi_track_active else self._audio_output.isMuted()
@@ -1223,7 +1226,7 @@ class VideoPlayerWidget(QWidget):
                 self._audio_output.setVolume(0.0)
                 self._apply_stem_volumes()
             self._player.play()
-            self._play_btn.setIcon(get_icon("pause", "#38bdf8", "#38bdf8", 14))
+            self._play_btn.setIcon(get_icon("pause", "#FFFFFF", "#FFFFFF", 14))
             if self._multi_track_active:
                 for p, p_path in [
                     (self._vi_voice_player, self._vi_voice_path),
@@ -1238,7 +1241,7 @@ class VideoPlayerWidget(QWidget):
     def pause(self):
         if self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self._player.pause()
-            self._play_btn.setIcon(get_icon("play", "#9ca3af", "#38bdf8", 14))
+            self._play_btn.setIcon(get_icon("play", "#FFFFFF", "#FFFFFF", 14))
         for p in (self._vi_voice_player, self._orig_bgm_player, self._custom_bgm_player, self._orig_voice_player):
             if p.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
                 p.pause()
@@ -1246,7 +1249,7 @@ class VideoPlayerWidget(QWidget):
     def _on_player_playback_state_changed(self, state: QMediaPlayer.PlaybackState):
         """Keep all audio stems in sync with main player state transitions."""
         if state == QMediaPlayer.PlaybackState.PlayingState:
-            self._play_btn.setIcon(get_icon("pause", "#38bdf8", "#38bdf8", 14))
+            self._play_btn.setIcon(get_icon("pause", "#FFFFFF", "#FFFFFF", 14))
             pos = self._player.position()
             if self._multi_track_active:
                 for p, p_path in [
@@ -1261,7 +1264,7 @@ class VideoPlayerWidget(QWidget):
                         if p.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
                             p.play()
         else:
-            self._play_btn.setIcon(get_icon("play", "#9ca3af", "#38bdf8", 14))
+            self._play_btn.setIcon(get_icon("play", "#FFFFFF", "#FFFFFF", 14))
             for p in (self._vi_voice_player, self._orig_bgm_player, self._custom_bgm_player, self._orig_voice_player):
                 if p.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
                     p.pause()

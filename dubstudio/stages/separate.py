@@ -73,6 +73,28 @@ def _perform_separation(
         separator.torch_device = torch.device("cuda")
         print(f"[separate] Running {model_name} on GPU CUDA ({torch.cuda.get_device_name(0)})", flush=True)
 
+    # Strict physical check to prevent silent downloading from internet
+    model_file = models_dir / model_name
+    if not (model_file.exists() and model_file.stat().st_size > 1024 * 1024):
+        from dubstudio.paths import get_models_dir
+        cand1 = get_models_dir() / "audio-separator" / model_name
+        cand2 = Path("models/audio-separator") / model_name
+        cand3 = get_models_dir() / model_name
+        cand4 = Path("models") / model_name
+        found = False
+        for c in (cand1, cand2, cand3, cand4):
+            if c.exists() and c.is_file() and c.stat().st_size > 1024 * 1024:
+                models_dir = c.parent
+                separator.model_file_dir = str(models_dir.resolve())
+                found = True
+                break
+        if not found:
+            raise DubError(
+                code="MODEL_NOT_FOUND",
+                user_message_vi=f"Không tìm thấy mô hình tách nhạc '{model_name}' cục bộ trên máy.",
+                hint_vi="Vui lòng kiểm tra lại thư mục models/audio-separator/ hoặc tải mô hình trong trang Cài đặt.",
+            )
+
     separator.load_model(model_name)
     output_files = separator.separate(str(input_audio.resolve()))
 
@@ -142,6 +164,17 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
         models_dir = local_models
     else:
         models_dir.mkdir(parents=True, exist_ok=True)
+
+    # Pre-check before launching isolated process
+    target_chk = models_dir / sep_model
+    if not (target_chk.exists() and target_chk.stat().st_size > 1024 * 1024):
+        cand = get_models_dir() / "audio-separator" / sep_model
+        if not (cand.exists() and cand.stat().st_size > 1024 * 1024):
+            raise DubError(
+                code="MODEL_NOT_FOUND",
+                user_message_vi=f"Không tìm thấy mô hình tách nhạc '{sep_model}' cục bộ trên máy.",
+                hint_vi="Vui lòng kiểm tra lại thư mục models/audio-separator/ hoặc tải mô hình trong trang Cài đặt.",
+            )
 
     from dubstudio.packaging import get_runtime_python, get_subprocess_env, safe_subprocess_run
     cmd = [

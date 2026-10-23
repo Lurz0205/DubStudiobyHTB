@@ -147,7 +147,7 @@ class SubtitleEditorWidget(QTableWidget):
         self.setHorizontalHeaderLabels(headers)
 
         hh = self.horizontalHeader()
-        hh.setStyleSheet("QHeaderView::section { padding: 6px 4px; }")
+        hh.setStyleSheet("QHeaderView::section { padding: 8px 6px; background-color: #171B26; color: #94A3B8; border: none; border-bottom: 1px solid #262C3A; font-weight: 600; font-size: 11px; }")
         hh.setSectionResizeMode(self.COL_IDX, QHeaderView.ResizeMode.Fixed)
         hh.setSectionResizeMode(self.COL_TIME, QHeaderView.ResizeMode.Fixed)
         hh.setSectionResizeMode(self.COL_ZH, QHeaderView.ResizeMode.Interactive)
@@ -167,7 +167,7 @@ class SubtitleEditorWidget(QTableWidget):
         self.setEditTriggers(QAbstractItemView.EditTrigger.SelectedClicked |
                              QAbstractItemView.EditTrigger.EditKeyPressed)
         self.setWordWrap(True)
-        self.verticalHeader().setDefaultSectionSize(48)
+        self.verticalHeader().setDefaultSectionSize(38)
         self.setShowGrid(False)
         self.setIconSize(QSize(18, 18))
         self.setMouseTracking(False)
@@ -779,48 +779,49 @@ class FindReplaceBar(QWidget):
         layout.setSpacing(6)
         self.setStyleSheet("""
             FindReplaceBar {
-                background-color: #14151b;
-                border: 1px solid #21242c;
-                border-radius: 6px;
+                background-color: #171B26;
+                border: 1px solid #262C3A;
+                border-radius: 8px;
             }
             QLineEdit {
-                background-color: #0c0d10;
-                color: #f0f2f5;
-                border: 1px solid #2d3139;
-                border-radius: 4px;
+                background-color: #0B0D13;
+                color: #F1F5F9;
+                border: 1px solid #262C3A;
+                border-radius: 6px;
                 padding: 4px 8px;
-                font-size: 12px;
+                font-size: 11.5px;
             }
             QLineEdit:focus {
-                border: 1px solid #38bdf8;
+                border: 1px solid #6366F1;
             }
             QPushButton {
-                background-color: #1a1d24;
-                color: #d1d5db;
-                border: 1px solid #2d3139;
-                border-radius: 4px;
+                background-color: #1F2433;
+                color: #E2E8F0;
+                border: 1px solid #262C3A;
+                border-radius: 6px;
                 padding: 4px 10px;
-                font-size: 12px;
+                font-size: 11.5px;
             }
             QPushButton:hover {
-                background-color: #262a35;
+                background-color: #282F42;
                 color: #ffffff;
+                border-color: #3730A3;
             }
             QPushButton#primary {
-                background-color: #0284c7;
+                background-color: #6366F1;
                 color: #ffffff;
-                border: none;
+                border: 1px solid #818CF8;
             }
             QPushButton#primary:hover {
-                background-color: #0369a1;
+                background-color: #4F46E5;
             }
             QPushButton#danger {
-                background-color: #7f1d1d;
-                color: #fca5a5;
-                border: 1px solid #991b1b;
+                background-color: #4C1D24;
+                color: #FCA5A5;
+                border: 1px solid #7F1D1D;
             }
             QPushButton#danger:hover {
-                background-color: #991b1b;
+                background-color: #7F1D1D;
                 color: #ffffff;
             }
         """)

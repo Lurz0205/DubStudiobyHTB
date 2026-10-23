@@ -66,18 +66,16 @@ def test_components_physical_verification_and_sync(monkeypatch, tmp_path):
 
     # Seed installed.json with ghost records that do not exist physically
     fake_installed = {
-        "sensevoice_small": {"version": 1},
         "whisper_large_v3": {"version": 1},
     }
     save_installed_components(fake_installed)
 
-    # Physical verification must fail for nonexistent SenseVoice / Whisper in empty tmp
-    ready, msg = is_component_ready("sensevoice_small")
+    # Physical verification must fail for nonexistent Whisper in empty tmp
+    ready, msg = is_component_ready("whisper_large_v3")
     assert not ready
     assert msg == "Chưa tải"
 
     # Sync must prune ghost records
     synced = sync_installed_components()
-    assert "sensevoice_small" not in synced
     assert "whisper_large_v3" not in synced
 

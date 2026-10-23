@@ -116,7 +116,7 @@ class MainWindow(QMainWindow):
         self._btn_group.setExclusive(True)
 
         self._btn_projects = QPushButton("  Dự án")
-        self._btn_projects.setIcon(get_icon("folder", "#9ca3af", "#38bdf8", 17))
+        self._btn_projects.setIcon(get_icon("folder", "#9ca3af", "#818CF8", 17))
         self._btn_projects.setIconSize(QSize(17, 17))
         self._btn_projects.setProperty("class", "nav_item")
         self._btn_projects.setToolTip("Quản lý danh sách các dự án lồng tiếng")
@@ -127,7 +127,7 @@ class MainWindow(QMainWindow):
         side_layout.addWidget(self._btn_projects)
 
         self._btn_studio = QPushButton("  Lồng tiếng")
-        self._btn_studio.setIcon(get_icon("mic", "#9ca3af", "#38bdf8", 17))
+        self._btn_studio.setIcon(get_icon("mic", "#9ca3af", "#818CF8", 17))
         self._btn_studio.setIconSize(QSize(17, 17))
         self._btn_studio.setProperty("class", "nav_item")
         self._btn_studio.setToolTip("Xem trước video, chỉnh sửa câu thoại, timeline và tạo lồng tiếng")
@@ -136,7 +136,7 @@ class MainWindow(QMainWindow):
         side_layout.addWidget(self._btn_studio)
 
         self._btn_export = QPushButton("  Phụ đề")
-        self._btn_export.setIcon(get_icon("subtitles", "#9ca3af", "#38bdf8", 17))
+        self._btn_export.setIcon(get_icon("subtitles", "#9ca3af", "#818CF8", 17))
         self._btn_export.setIconSize(QSize(17, 17))
         self._btn_export.setProperty("class", "nav_item")
         self._btn_export.setToolTip("Tùy biến phong cách và cách khắc phụ đề vào video")
@@ -145,7 +145,7 @@ class MainWindow(QMainWindow):
         side_layout.addWidget(self._btn_export)
 
         self._btn_merge = QPushButton("  Chỉnh sửa video")
-        self._btn_merge.setIcon(get_icon("scissors", "#9ca3af", "#38bdf8", 17))
+        self._btn_merge.setIcon(get_icon("scissors", "#9ca3af", "#818CF8", 17))
         self._btn_merge.setIconSize(QSize(17, 17))
         self._btn_merge.setProperty("class", "nav_item")
         self._btn_merge.setToolTip("Cắt xén (Crop), đổi tỉ lệ 9:16 Shorts/TikTok, che logo, chèn watermark và xuất video")
@@ -167,7 +167,7 @@ class MainWindow(QMainWindow):
         side_layout.addWidget(lbl_sec_bottom)
 
         self._btn_check_updates = QPushButton("  Kiểm tra cập nhật")
-        self._btn_check_updates.setIcon(get_icon("download", "#9ca3af", "#38bdf8", 16))
+        self._btn_check_updates.setIcon(get_icon("download", "#9ca3af", "#818CF8", 16))
         self._btn_check_updates.setIconSize(QSize(16, 16))
         self._btn_check_updates.setProperty("class", "nav_item")
         self._btn_check_updates.setToolTip("Kiểm tra bản cập nhật mới trên GitHub và các gói dữ liệu AI")
@@ -175,7 +175,7 @@ class MainWindow(QMainWindow):
         side_layout.addWidget(self._btn_check_updates)
 
         self._btn_tutorial = QPushButton("  Hướng dẫn")
-        self._btn_tutorial.setIcon(get_icon("info", "#9ca3af", "#38bdf8", 16))
+        self._btn_tutorial.setIcon(get_icon("info", "#9ca3af", "#818CF8", 16))
         self._btn_tutorial.setIconSize(QSize(16, 16))
         self._btn_tutorial.setProperty("class", "nav_item")
         self._btn_tutorial.setToolTip("Xem lại bảng so sánh mô hình Whisper và hướng dẫn quy trình sử dụng")
@@ -183,7 +183,7 @@ class MainWindow(QMainWindow):
         side_layout.addWidget(self._btn_tutorial)
 
         self._btn_settings = QPushButton("  Cài đặt")
-        self._btn_settings.setIcon(get_icon("settings", "#9ca3af", "#38bdf8", 17))
+        self._btn_settings.setIcon(get_icon("settings", "#9ca3af", "#818CF8", 17))
         self._btn_settings.setIconSize(QSize(17, 17))
         self._btn_settings.setProperty("class", "nav_item")
         self._btn_settings.setToolTip("Cài đặt API key, giọng đọc mặc định")
@@ -605,4 +605,5 @@ class MainWindow(QMainWindow):
                     w.wait(500)
         event.accept()
         import os
-        os._exit(0)
+        if "PYTEST_CURRENT_TEST" not in os.environ:
+            os._exit(0)

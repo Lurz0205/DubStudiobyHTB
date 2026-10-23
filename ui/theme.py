@@ -1,36 +1,36 @@
 """Dark professional theme for DubStudio desktop app, inspired by Antigravity Soft Glass aesthetics."""
 
-# Refined Antigravity Soft Glass Color Palette
+# Refined Cinema Dark Studio Color Palette (CapCut Pro / DaVinci / Linear Dark)
 COLORS = {
-    "bg_deep": "#080910",         # Ultra-dark matte canvas
-    "bg": "#0d0f16",              # Primary container background
-    "surface": "#12141d",         # Card / Input surface with soft glass depth
-    "surface_raised": "#181b27",  # Elevated cards, row hover
-    "surface_hover": "#1f2335",   # Hover state
-    "border": "#1c2030",          # Ultra-subtle border
-    "border_light": "#262c3e",    # Slightly elevated border
-    "border_focus": "#38bdf8",    # Focus highlight
-    "accent": "#38bdf8",          # Signature sky-blue / cyan
-    "accent_hover": "#60c8ff",    # Lighter accent
-    "accent_pressed": "#0284c7",  # Deep accent
-    "accent_dim": "#0c2236",      # Selected / active background
-    "accent_border": "#194b71",   # Subtle accent border
-    "success": "#10b981",         # Emerald green
-    "success_dim": "#0a2618",     # Success tint
-    "warning": "#f59e0b",         # Warm amber
-    "error": "#ef4444",           # Rose red
-    "error_dim": "#2a0e10",       # Error tint
-    "text": "#eef0f6",            # Crisp high-contrast text
-    "text_secondary": "#8e96aa",  # Refined muted text
-    "text_muted": "#575f72",      # Subtle hints and labels
-    "text_disabled": "#3e4454",   # Disabled text
-    "selection": "#113550",       # Text selection
-    "timeline_bg": "#07080b",     # Ultra-dark timeline canvas
-    "track_bg": "#101219",        # Timeline track background
-    "track_sub": "#0d2d4a",       # Subtitle track
-    "track_tts": "#0a3820",       # TTS audio track
-    "handle": "#38bdf8",          # Interactive handle
-    "ruler": "#161824",           # Timeline ruler ticks
+    "bg_deep": "#0B0D13",         # Ultra-dark cinematic canvas
+    "bg": "#0B0D13",              # Primary container background
+    "surface": "#171B26",         # Standard Card / Frame / Control surface
+    "surface_raised": "#1F2433",  # Elevated cards, row hover
+    "surface_hover": "#282F42",   # Hover state
+    "border": "#262C3A",          # Clean studio subtle border
+    "border_light": "#323B4E",    # Elevated border
+    "border_focus": "#6366F1",    # Indigo focus highlight
+    "accent": "#6366F1",          # Primary Cinema Indigo Accent
+    "accent_hover": "#4F46E5",    # Indigo hover state
+    "accent_pressed": "#4338CA",  # Indigo deep pressed
+    "accent_dim": "#1E2436",      # Active navigation & card selection tint
+    "accent_border": "#3730A3",   # Accent container border
+    "success": "#10B981",         # Emerald green
+    "success_dim": "#064E3B",     # Success tint
+    "warning": "#F59E0B",         # Amber warning
+    "error": "#EF4444",           # Rose red error
+    "error_dim": "#4C1D24",       # Error tint
+    "text": "#F1F5F9",            # Crisp slate text
+    "text_secondary": "#94A3B8",  # Refined secondary muted text
+    "text_muted": "#64748B",      # Subtle hints and labels
+    "text_disabled": "#475569",   # Disabled text
+    "selection": "#312E81",       # Indigo text selection
+    "timeline_bg": "#080A0F",     # Ultra-dark timeline canvas
+    "track_bg": "#11141D",        # Timeline track background
+    "track_sub": "#1E1B4B",       # Indigo Subtitle track
+    "track_tts": "#064E3B",       # Emerald TTS audio track
+    "handle": "#6366F1",          # Interactive handle
+    "ruler": "#1A1F2C",           # Timeline ruler ticks
 }
 
 from pathlib import Path
@@ -65,7 +65,7 @@ STYLESHEET = f"""
 QWidget {{
     background-color: {COLORS['bg']};
     color: {COLORS['text']};
-    font-family: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+    font-family: "Segoe UI Variable Display", "Segoe UI", "Inter", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
     font-size: 10pt;
     border: none;
     outline: none;
@@ -75,22 +75,22 @@ QMainWindow {{
     background-color: {COLORS['bg_deep']};
 }}
 
-/* ─── Sidebar (Antigravity Clean Vertical Navigation) ─── */
+/* ─── Sidebar (Cinema Dark Studio Vertical Navigation) ─── */
 #sidebar {{
-    background-color: {COLORS['bg_deep']};
+    background-color: #11141D;
     border-right: 1px solid {COLORS['border']};
-    min-width: 190px;
-    max-width: 190px;
+    min-width: 195px;
+    max-width: 195px;
 }}
 
 #sidebar_brand {{
-    padding: 14px 12px 10px 12px;
+    padding: 16px 14px 10px 14px;
 }}
 
 #sidebar_logo_text {{
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 700;
-    color: {COLORS['text']};
+    color: #FFFFFF;
     letter-spacing: 0.4px;
 }}
 
@@ -100,23 +100,23 @@ QMainWindow {{
 }}
 
 #sidebar_section_title {{
-    font-size: 9px;
+    font-size: 9.5px;
     font-weight: 700;
     color: {COLORS['text_muted']};
     text-transform: uppercase;
     letter-spacing: 1.2px;
-    padding: 12px 12px 3px 12px;
+    padding: 14px 14px 4px 14px;
 }}
 
 /* Sidebar Pill Action Button (+ Tạo dự án mới) */
 QPushButton#sidebar_cta {{
     background-color: {COLORS['surface']};
     border: 1px solid {COLORS['border_light']};
-    border-radius: 14px;
-    padding: 7px 12px;
-    margin: 4px 10px 10px 10px;
-    color: {COLORS['text']};
-    font-size: 11px;
+    border-radius: 10px;
+    padding: 8px 14px;
+    margin: 4px 10px 12px 10px;
+    color: #FFFFFF;
+    font-size: 11.5px;
     font-weight: 600;
     text-align: left;
 }}
@@ -124,7 +124,7 @@ QPushButton#sidebar_cta {{
 QPushButton#sidebar_cta:hover {{
     background-color: {COLORS['surface_raised']};
     border-color: {COLORS['accent']};
-    color: {COLORS['accent']};
+    color: #FFFFFF;
 }}
 
 QPushButton#sidebar_cta:pressed {{
@@ -135,35 +135,36 @@ QPushButton#sidebar_cta:pressed {{
 #sidebar QPushButton.nav_item {{
     background-color: transparent;
     border: 1px solid transparent;
-    border-radius: 9px;
-    padding: 8px 10px;
-    margin: 1px 8px;
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin: 2px 8px;
     color: {COLORS['text_secondary']};
     font-size: 11.5px;
     font-weight: 500;
     text-align: left;
-    min-height: 18px;
+    min-height: 20px;
 }}
 
 #sidebar QPushButton.nav_item:hover {{
     background-color: {COLORS['surface_raised']};
-    color: {COLORS['text']};
+    color: #FFFFFF;
 }}
 
 #sidebar QPushButton.nav_item[active="true"] {{
     background-color: {COLORS['accent_dim']};
     border: 1px solid {COLORS['accent_border']};
-    color: {COLORS['accent']};
+    border-left: 3px solid {COLORS['accent']};
+    color: #FFFFFF;
     font-weight: 600;
 }}
 
 /* ─── Header / Toolbar Bar ─── */
 #header {{
-    background-color: {COLORS['bg_deep']};
+    background-color: #11141D;
     border-bottom: 1px solid {COLORS['border']};
-    padding: 0 16px;
-    min-height: 44px;
-    max-height: 44px;
+    padding: 0 18px;
+    min-height: 46px;
+    max-height: 46px;
 }}
 
 #app_title {{
@@ -233,16 +234,16 @@ QPushButton#compact:hover {{
 
 /* Primary Accent Button */
 QPushButton#primary {{
-    background-color: #0b78b8;
-    border: 1px solid #38bdf8;
+    background-color: #6366F1;
+    border: 1px solid #818CF8;
     color: #ffffff;
     font-weight: 600;
     border-radius: 8px;
 }}
 
 QPushButton#primary:hover {{
-    background-color: #0e93d8;
-    border-color: #6dd2fc;
+    background-color: #4F46E5;
+    border-color: #A5B4FC;
 }}
 
 QPushButton#primary:pressed {{
@@ -250,8 +251,8 @@ QPushButton#primary:pressed {{
 }}
 
 QPushButton#primary:disabled {{
-    background-color: #0a2d43;
-    border-color: #163a52;
+    background-color: #1E1B4B;
+    border-color: #312E81;
     color: {COLORS['text_disabled']};
 }}
 
@@ -486,27 +487,29 @@ QSpinBox#accent_spin::down-arrow {{
     height: 10px;
 }}
 
-/* ─── Minimal Slider ─── */
+/* ─── Cinema Dark Studio Slider ─── */
 QSlider::groove:horizontal {{
     height: 4px;
-    background-color: {COLORS['border_light']};
+    background-color: {COLORS['border']};
     border-radius: 2px;
 }}
 
 QSlider::handle:horizontal {{
     background-color: {COLORS['accent']};
-    border-radius: 6px;
-    width: 12px;
-    height: 12px;
-    margin: -4px 0;
+    border: 2px solid #FFFFFF;
+    border-radius: 7px;
+    width: 14px;
+    height: 14px;
+    margin: -5px 0;
 }}
 
 QSlider::handle:horizontal:hover {{
     background-color: {COLORS['accent_hover']};
-    width: 14px;
-    height: 14px;
-    margin: -5px 0;
-    border-radius: 7px;
+    border-color: #FFFFFF;
+    width: 16px;
+    height: 16px;
+    margin: -6px 0;
+    border-radius: 8px;
 }}
 
 QSlider::sub-page:horizontal {{
@@ -514,61 +517,61 @@ QSlider::sub-page:horizontal {{
     border-radius: 2px;
 }}
 
-/* ─── Tables (Bento Card Style) ─── */
-QTableWidget {{
-    background-color: #0f1119;
-    border: 1px solid #191d2c;
-    border-radius: 12px;
+/* ─── Cinema Studio Tables ─── */
+QTableWidget, QTableView {{
+    background-color: #11141D;
+    border: 1px solid {COLORS['border']};
+    border-radius: 10px;
     gridline-color: transparent;
-    selection-background-color: #0c2840;
+    selection-background-color: #1E2436;
     selection-color: {COLORS['text']};
-    alternate-background-color: #131725;
+    alternate-background-color: #141724;
     outline: none;
 }}
 
 QHeaderView::section {{
-    background-color: #14172a;
-    color: {COLORS['text_muted']};
-    padding: 9px 12px;
+    background-color: #171B26;
+    color: {COLORS['text_secondary']};
+    padding: 10px 12px;
     border: none;
-    border-right: 1px solid #191d2c;
-    border-bottom: 1px solid #1e2334;
-    font-size: 10.5px;
+    border-right: 1px solid {COLORS['border']};
+    border-bottom: 1px solid {COLORS['border']};
+    font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }}
 
-QTableWidget::item {{
-    padding: 7px 12px;
-    border-bottom: 1px solid #181c28;
+QTableWidget::item, QTableView::item {{
+    padding: 8px 12px;
+    border-bottom: 1px solid #1E2330;
 }}
 
-QTableWidget::item:hover {{
-    background-color: #171b2b;
+QTableWidget::item:hover, QTableView::item:hover {{
+    background-color: #1A1F2E;
 }}
 
-QTableWidget::item:selected {{
-    background-color: #0c2840;
-    color: #38bdf8;
+QTableWidget::item:selected, QTableView::item:selected {{
+    background-color: #1E2436;
+    color: #FFFFFF;
 }}
 
-/* ─── Sleek ScrollBar ─── */
+/* ─── Sleek Studio ScrollBar ─── */
 QScrollBar:vertical {{
     background-color: transparent;
-    width: 5px;
+    width: 7px;
     margin: 0;
-    border-radius: 3px;
+    border-radius: 3.5px;
 }}
 
 QScrollBar::handle:vertical {{
-    background-color: {COLORS['border_light']};
-    border-radius: 3px;
+    background-color: #333B4D;
+    border-radius: 3.5px;
     min-height: 36px;
 }}
 
 QScrollBar::handle:vertical:hover {{
-    background-color: {COLORS['text_muted']};
+    background-color: #4B5563;
 }}
 
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
@@ -577,19 +580,19 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
 
 QScrollBar:horizontal {{
     background-color: transparent;
-    height: 5px;
+    height: 7px;
     margin: 0;
-    border-radius: 3px;
+    border-radius: 3.5px;
 }}
 
 QScrollBar::handle:horizontal {{
-    background-color: {COLORS['border_light']};
-    border-radius: 3px;
+    background-color: #333B4D;
+    border-radius: 3.5px;
     min-width: 36px;
 }}
 
 QScrollBar::handle:horizontal:hover {{
-    background-color: {COLORS['text_muted']};
+    background-color: #4B5563;
 }}
 
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
