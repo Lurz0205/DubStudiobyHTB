@@ -160,14 +160,4 @@ elif tag_resp.status_code == 422:
     else:
         print(f"Notice: Khong the cap nhat tag {tag_name}: {patch_resp.status_code} {patch_resp.text}", flush=True)
 
-# 9. Also trigger workflow_dispatch directly to guarantee build execution
-try:
-    wf_resp = session.post(
-        f"{api_base}/actions/workflows/build_release.yml/dispatches",
-        json={"ref": "main", "inputs": {"version": "1.1.0", "tag_name": tag_name}},
-    )
-    if wf_resp.status_code in (204, 201):
-        print(f"[THANH CONG] Da kich hoat workflow build_release.yml tren GitHub Actions Azure!", flush=True)
-except Exception as e:
-    print(f"Notice: dispatch error: {e}", flush=True)
 

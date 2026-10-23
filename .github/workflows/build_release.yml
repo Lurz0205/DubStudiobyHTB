@@ -18,6 +18,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: build-release
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build Windows Application
@@ -85,6 +89,8 @@ jobs:
           } catch {
             Write-Host "No previous release found or download skipped. Building fresh release."
           }
+          # Ensure current version packages are removed so vpk pack generates fresh packages without collision
+          Get-ChildItem -Path "dist\releases" -Filter "*$env:VERSION*" -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 
       - name: Build Application with PyInstaller
         shell: pwsh
