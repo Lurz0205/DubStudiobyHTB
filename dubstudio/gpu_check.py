@@ -180,4 +180,3 @@ def inspect_gpu_and_driver(min_driver: str = MIN_NVIDIA_DRIVER_VERSION, force_re
     }
     _CACHED_GPU_INSPECTION = res
     return res
-    }
