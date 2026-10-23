@@ -1113,10 +1113,12 @@ class VideoPlayerWidget(QWidget):
                         p.play()
 
     def pause(self):
-        self._player.pause()
-        self._play_btn.setIcon(get_icon("play", "#9ca3af", "#38bdf8", 14))
+        if self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self._player.pause()
+            self._play_btn.setIcon(get_icon("play", "#9ca3af", "#38bdf8", 14))
         for p in (self._vi_voice_player, self._orig_bgm_player, self._custom_bgm_player, self._orig_voice_player):
-            p.pause()
+            if p.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                p.pause()
 
     def _on_player_playback_state_changed(self, state: QMediaPlayer.PlaybackState):
         """Keep all audio stems in sync with main player state transitions."""
