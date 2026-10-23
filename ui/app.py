@@ -85,6 +85,7 @@ def main():
             port=port,
             log_level="error",
             log_config=None,
+            access_log=False,
         )
         def _run_server():
             import asyncio
@@ -172,6 +173,43 @@ def main():
             except Exception:
                 pass
         QTimer.singleShot(2000, _check_bg_status)
+
+    # Install GUI Freeze Watchdog (records exact stack trace if Main Thread freezes > 0.5s)
+    def start_gui_freeze_watchdog(threshold_sec=0.5):
+        from dubstudio.paths import get_logs_dir
+        log_file = get_logs_dir() / "gui_freeze_dump.log"
+        main_thread_id = threading.main_thread().ident
+        last_heartbeat = [time.perf_counter()]
+
+        from PyQt6.QtCore import QTimer
+        w_timer = QTimer()
+        w_timer.setInterval(100)
+        w_timer.timeout.connect(lambda: last_heartbeat.__setitem__(0, time.perf_counter()))
+        w_timer.start()
+
+        def watchdog_loop():
+            import traceback
+            while True:
+                time.sleep(0.2)
+                elapsed = time.perf_counter() - last_heartbeat[0]
+                if elapsed > threshold_sec:
+                    frames = sys._current_frames()
+                    main_frame = frames.get(main_thread_id)
+                    if main_frame:
+                        stack_str = "".join(traceback.format_stack(main_frame))
+                        try:
+                            with open(log_file, "a", encoding="utf-8") as f:
+                                f.write(f"\n=== PHAT HIEN DO GUI ({elapsed:.2f}s) [{time.strftime('%Y-%m-%d %H:%M:%S')}] ===\n")
+                                f.write(stack_str)
+                        except Exception:
+                            pass
+                    time.sleep(1.0)
+
+        t = threading.Thread(target=watchdog_loop, daemon=True)
+        t.start()
+        return w_timer
+
+    _freeze_watchdog_timer = start_gui_freeze_watchdog(threshold_sec=0.5)
 
     print("[DubStudio] Ready!")
     sys.exit(app.exec())
