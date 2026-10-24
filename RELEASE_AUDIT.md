@@ -2,7 +2,7 @@
 
 - **Mục tiêu phát hành:** `v1.1.3`
 - **Phiên bản gốc đối chiếu:** `v1.1.2`
-- **Thời gian kiểm toán:** `2026-10-24 19:29:37`
+- **Thời gian kiểm toán:** `2026-10-24 19:32:50`
 - **Tổng số file thay đổi:** `54` (47 sửa đổi, 7 thêm mới, 0 đã xóa)
 
 ---
@@ -41,7 +41,7 @@
 | **Modified** | `DubStudio.spec` | `eb97325` | `571f302` |
 | **Modified** | `PROGRESS.md` | `8b98e6d` | `c8131f4` |
 | **Modified** | `README.md` | `11132e4` | `44bf192` |
-| **Modified** | `RELEASE_NOTES.md` | `3437d7f` | `c7a5ac2` |
+| **Modified** | `RELEASE_NOTES.md` | `3437d7f` | `2c9881e` |
 | **Modified** | `config/subtitle_preset.json` | `bfaaf0b` | `49d456c` |
 | **Modified** | `dubstudio/api/app.py` | `678225e` | `57696da` |
 | **Modified** | `dubstudio/components.py` | `f0c242f` | `30eaf30` |
@@ -101,3 +101,4 @@
 - [`a717b20`] Release v1.1.3: Tag-to-tag audit, locked delta updater, and smart model migration
 - [`a7ccb10`] Update source tree snapshot
 - [`44a9a40`] Update source tree snapshot
+- [`1f3b775`] Update source tree snapshot

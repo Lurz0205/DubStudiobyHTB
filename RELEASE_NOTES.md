@@ -1,22 +1,25 @@
-# DubStudio v1.1.3 — Bản cập nhật & Tối ưu hóa Toàn diện
+# DubStudio v1.1.3 — Nâng cấp Âm thanh, Phụ đề & Trải nghiệm Người dùng
 
-Bản cập nhật v1.1.3 tập trung nâng cấp chất lượng âm thanh phát thanh, cải tiến cơ chế lồng tiếng thoát ý, xử lý triệt để lỗi phản hồi TTS và bảo toàn mô hình AI tuyệt đối:
+Bản cập nhật v1.1.3 mang đến nhiều cải tiến lớn giúp âm thanh to rõ hơn, phụ đề khớp đẹp mắt và quy trình lồng tiếng mượt mà hơn:
 
 ### 🌟 Điểm mới nổi bật:
 
-1. **Âm thanh Chuẩn Phát thanh & Tăng âm lượng 200% (EBU R128):**
-   - **Chất âm dày ấm, không vỡ tiếng:** Áp dụng chuẩn phát thanh quốc tế ITU-R BS.1770 / EBU R128 (`loudnorm`), lọc tạp âm siêu trầm (<75 Hz) và tiếng rít tổng hợp (>12.5 kHz), khóa trần True Peak -0.8 dBFS giúp loại bỏ 100% hiện tượng rè và vỡ tiếng khi khuếch đại.
-   - **Tăng âm lượng thực thụ 200%:** Đường cong âm lượng tâm thính học mới giúp mức 200% tăng vọt +10.5 dB acoustic power (tai người nghe to gấp đôi thực thụ), giọng thuyết minh vang to, uy lực và áp đảo nhạc nền.
-   - **Điều khiển tức thì 0ms:** Cả 4 thanh trượt (Thuyết minh, Nhạc nền, Nhạc thêm, Giọng gốc) mở rộng từ 0% đến 200%, phản hồi mượt mà không bị ngắt tiếng hay tráo file.
+1. **Giọng đọc to gấp đôi, trong trẻo và không bị rè:**
+   - Khi kéo thanh âm lượng lên **200%**, giọng đọc to rõ vượt trội, lấn át nhạc nền tốt hơn mà âm thanh vẫn dày ấm, êm tai, hoàn toàn không bị vỡ hay rè tiếng.
+   - Các thanh chỉnh âm lượng phản hồi tức thì, mượt mà khi nghe thử.
 
-2. **Khắc phục Triệt để Lỗi Not Responding khi Tạo TTS:**
-   - Khử deadlock bộ đệm pipe hệ điều hành và đồng bộ luồng giao diện, chấm dứt hoàn toàn tình trạng đơ/treo ứng dụng khi tạo giọng thuyết minh.
-   - Quản lý bộ nhớ VRAM thông minh: tự động tắt worker trước khi chạy pipeline chính, chống tràn VRAM trên GPU 4 GB.
+2. **Phụ đề che kín chữ gốc, khớp 100% giữa xem trước và xuất video:**
+   - Khung nền đen và cỡ chữ khi xuất video giờ đây hiển thị y hệt như lúc xem trước (Preview), che kín hoàn toàn dòng chữ tiếng Trung gốc bên dưới.
 
-3. **Lồng tiếng "Thoát Ý" & Chống Hở Khoảng Lặng:**
-   - Dịch lại thoát ý tự nhiên theo khẩu ngữ đời thường, chấm dứt việc cắt xén cơ học làm mất chủ ngữ hay câu nói què quặt lủng củng.
-   - Khóa sàn ký tự `min_chars` nghiêm ngặt và căn chỉnh tỷ lệ nén vừa vặn, triệt tiêu hoàn toàn hiện tượng giọng đọc kết thúc quá sớm gây hở khoảng lặng chết trong khi diễn viên trên hình vẫn đang nói.
+3. **Lồng tiếng nói chuyện tự nhiên, không bị hở câu:**
+   - AI dịch thoát ý theo cách nói chuyện đời thường của người Việt, câu từ trôi chảy, tự nhiên thay vì cắt cụt câu làm mất nghĩa.
+   - Giọng đọc khớp khít với khẩu hình và nhịp nói của diễn viên trong video, không còn tình trạng dứt câu quá sớm tạo khoảng lặng trống.
 
-4. **Bảo toàn Dữ liệu & Cập nhật Minh bạch:**
-   - **Smart Model Migration:** Tự động gom và bảo toàn nguyên vẹn 100% các mô hình AI (`SenseVoice`, `Demucs`, `VieNeu-TTS`) sang `%LocalAppData%\DubStudioData\models`, tự động chuyển đổi đường dẫn cài đặt cũ mà không bắt người dùng tải lại bất kỳ file nào.
-   - Cơ chế đóng gói và cập nhật siêu nhẹ qua gói `delta.nupkg` được khóa chặt và kiểm toán minh bạch 100% qua lịch sử Git.
+4. **Lưu video tiện lợi, dễ tìm:**
+   - Video sau khi xuất xong sẽ nằm ngay trong thư mục **Videos/DubStudio** quen thuộc trên máy tính.
+   - Thêm nút đổi thư mục lưu và tự động mở sẵn video để bạn xem lại ngay.
+
+5. **Hoạt động ổn định, cập nhật siêu nhẹ:**
+   - Sửa triệt để hiện tượng thỉnh thoảng bị đơ khi tạo giọng đọc.
+   - Giữ nguyên toàn bộ các mô hình AI đã tải, không bắt tải lại khi nâng cấp.
+   - Bản cập nhật nâng cấp cực nhanh chỉ trong vài giây.
