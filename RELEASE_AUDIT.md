@@ -2,8 +2,8 @@
 
 - **Mục tiêu phát hành:** `v1.1.3`
 - **Phiên bản gốc đối chiếu:** `v1.1.2`
-- **Thời gian kiểm toán:** `2026-10-24 19:17:34`
-- **Tổng số file thay đổi:** `53` (46 sửa đổi, 7 thêm mới, 0 đã xóa)
+- **Thời gian kiểm toán:** `2026-10-24 19:25:23`
+- **Tổng số file thay đổi:** `54` (47 sửa đổi, 7 thêm mới, 0 đã xóa)
 
 ---
 
@@ -39,7 +39,8 @@
 | **Modified** | `.github/workflows/build_release.yml` | `a42b286` | `f259ebf` |
 | **Modified** | `AGENTS.md` | `62cac09` | `3e0334b` |
 | **Modified** | `DubStudio.spec` | `eb97325` | `571f302` |
-| **Modified** | `PROGRESS.md` | `8b98e6d` | `0bd1a06` |
+| **Modified** | `PROGRESS.md` | `8b98e6d` | `c8131f4` |
+| **Modified** | `README.md` | `11132e4` | `bf703b6` |
 | **Modified** | `RELEASE_NOTES.md` | `3437d7f` | `c7a5ac2` |
 | **Modified** | `config/subtitle_preset.json` | `bfaaf0b` | `49d456c` |
 | **Modified** | `dubstudio/api/app.py` | `678225e` | `57696da` |
@@ -64,7 +65,7 @@
 | **Modified** | `dubstudio/version.py` | `92ed50d` | `0ed62e0` |
 | **Modified** | `dubstudio/win_job.py` | `c564d6e` | `57b5253` |
 | **Modified** | `scripts/build_app.ps1` | `c211d51` | `905795d` |
-| **Modified** | `scripts/push_code_to_github.py` | `0b2ed38` | `d17759f` |
+| **Modified** | `scripts/push_code_to_github.py` | `0b2ed38` | `21dd9f5` |
 | **Modified** | `scripts/sim_user_machine.ps1` | `9898e47` | `3c0c5f1` |
 | **Modified** | `start_app.py` | `2378504` | `8aa6f48` |
 | **Modified** | `tests/test_api.py` | `5ee1602` | `42b9528` |
@@ -98,3 +99,4 @@
 - [`922184e`] Update GitHub push script to Full-Tree Deterministic Snapshot Sync
 - [`d8b2c43`] Release v1.1.3: Studio audio mastering, 200% volume fix, render fix, and safe updater
 - [`a717b20`] Release v1.1.3: Tag-to-tag audit, locked delta updater, and smart model migration
+- [`a7ccb10`] Update source tree snapshot
