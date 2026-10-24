@@ -21,7 +21,7 @@ Toàn bộ các mô hình AI hạng nặng (tách nhạc nền, nhận dạng ti
 
 ---
 
-## 🌟 Tính năng cốt lõi của DubStudio
+## 🌟 Tính năng chính
 
 ### 1. Tách nhạc nền & Lời thoại AI (Vocal / BGM Separation)
 - Sử dụng mô hình tách âm thanh tiên tiến (Kim_Vocal_2 / BS-RoFormer) để tách hoàn toàn giọng nói tiếng Trung ra khỏi nhạc nền và hiệu ứng âm thanh (SFX).
