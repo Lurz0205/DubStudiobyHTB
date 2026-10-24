@@ -76,13 +76,15 @@ def _perform_separation(
     # Strict physical check to prevent silent downloading from internet
     model_file = models_dir / model_name
     if not (model_file.exists() and model_file.stat().st_size > 1024 * 1024):
-        from dubstudio.paths import get_models_dir
-        cand1 = get_models_dir() / "audio-separator" / model_name
-        cand2 = Path("models/audio-separator") / model_name
-        cand3 = get_models_dir() / model_name
-        cand4 = Path("models") / model_name
+        from dubstudio.paths import get_models_dir, get_model_search_paths
+        candidates = []
+        for b in get_model_search_paths():
+            candidates.append(b / "audio-separator" / model_name)
+            candidates.append(b / model_name)
+        candidates.append(Path("models/audio-separator") / model_name)
+        candidates.append(Path("models") / model_name)
         found = False
-        for c in (cand1, cand2, cand3, cand4):
+        for c in candidates:
             if c.exists() and c.is_file() and c.stat().st_size > 1024 * 1024:
                 models_dir = c.parent
                 separator.model_file_dir = str(models_dir.resolve())
@@ -166,10 +168,20 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
         models_dir.mkdir(parents=True, exist_ok=True)
 
     # Pre-check before launching isolated process
+    from dubstudio.paths import get_model_search_paths
     target_chk = models_dir / sep_model
     if not (target_chk.exists() and target_chk.stat().st_size > 1024 * 1024):
-        cand = get_models_dir() / "audio-separator" / sep_model
-        if not (cand.exists() and cand.stat().st_size > 1024 * 1024):
+        found_cand = None
+        for b in get_model_search_paths():
+            c1 = b / "audio-separator" / sep_model
+            c2 = b / sep_model
+            if c1.exists() and c1.stat().st_size > 1024 * 1024:
+                found_cand = c1
+                break
+            if c2.exists() and c2.stat().st_size > 1024 * 1024:
+                found_cand = c2
+                break
+        if not found_cand:
             raise DubError(
                 code="MODEL_NOT_FOUND",
                 user_message_vi=f"Không tìm thấy mô hình tách nhạc '{sep_model}' cục bộ trên máy.",

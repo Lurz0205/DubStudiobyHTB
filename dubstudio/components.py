@@ -10,7 +10,7 @@ import time
 from typing import Any, Dict, List, Optional
 import httpx
 
-from dubstudio.packaging import get_user_data_dir, is_packaged
+from dubstudio.packaging import get_user_data_dir, is_packaged, get_model_search_paths
 from dubstudio.version import APP_VERSION
 
 def _load_default_manifest() -> Dict[str, Any]:
@@ -312,8 +312,9 @@ def is_component_ready(pkg_id: str) -> Tuple[bool, str]:
     Inspects installed.json first, then verifies physical presence on disk.
     Returns (is_ready, user_explanation_vi).
     """
-    from dubstudio.paths import get_models_dir, get_bin_dir, resolve_tool
+    from dubstudio.paths import get_models_dir, get_bin_dir, resolve_tool, get_model_search_paths
     models_dir = get_models_dir()
+    search_bases = get_model_search_paths()
 
     # 1. Physical presence fast-checks
     if pkg_id == "ffmpeg_binaries":
@@ -324,31 +325,31 @@ def is_component_ready(pkg_id: str) -> Tuple[bool, str]:
             return False, "Thiếu tệp ffmpeg.exe trong bin/"
 
     if pkg_id == "kim_vocal_2":
-        candidates = [
-            models_dir / "audio-separator" / "Kim_Vocal_2.onnx",
-            models_dir / "Kim_Vocal_2.onnx",
-            Path("models/audio-separator/Kim_Vocal_2.onnx"),
-            Path("models/Kim_Vocal_2.onnx"),
-        ]
+        candidates = []
+        for b in search_bases:
+            candidates.append(b / "audio-separator" / "Kim_Vocal_2.onnx")
+            candidates.append(b / "Kim_Vocal_2.onnx")
+        candidates.append(Path("models/audio-separator/Kim_Vocal_2.onnx"))
+        candidates.append(Path("models/Kim_Vocal_2.onnx"))
         if any(c.is_file() and c.stat().st_size > 1024 * 1024 for c in candidates):
             return True, "Đã sẵn sàng"
 
     if pkg_id == "bs_roformer":
-        candidates = [
-            models_dir / "audio-separator" / "model_bs_roformer_ep_317_sdr_12.9755.ckpt",
-            models_dir / "model_bs_roformer_ep_317_sdr_12.9755.ckpt",
-            Path("models/audio-separator/model_bs_roformer_ep_317_sdr_12.9755.ckpt"),
-            Path("models/model_bs_roformer_ep_317_sdr_12.9755.ckpt"),
-        ]
+        candidates = []
+        for b in search_bases:
+            candidates.append(b / "audio-separator" / "model_bs_roformer_ep_317_sdr_12.9755.ckpt")
+            candidates.append(b / "model_bs_roformer_ep_317_sdr_12.9755.ckpt")
+        candidates.append(Path("models/audio-separator/model_bs_roformer_ep_317_sdr_12.9755.ckpt"))
+        candidates.append(Path("models/model_bs_roformer_ep_317_sdr_12.9755.ckpt"))
         if any(c.is_file() and c.stat().st_size > 1024 * 1024 for c in candidates):
             return True, "Đã sẵn sàng"
 
     if pkg_id == "sensevoice_small":
-        candidates = [
-            models_dir / "SenseVoiceSmall",
-            models_dir / "hf" / "hub" / "models--FunAudioLLM--SenseVoiceSmall",
-            Path("models/SenseVoiceSmall"),
-        ]
+        candidates = []
+        for b in search_bases:
+            candidates.append(b / "SenseVoiceSmall")
+            candidates.append(b / "hf" / "hub" / "models--FunAudioLLM--SenseVoiceSmall")
+        candidates.append(Path("models/SenseVoiceSmall"))
         for c in candidates:
             if c.is_dir():
                 for target_file in [c / "model.pt", c / "model.onnx"]:
@@ -360,12 +361,12 @@ def is_component_ready(pkg_id: str) -> Tuple[bool, str]:
         return False, "Chưa tải"
 
     if pkg_id == "whisper_large_v3":
-        candidates = [
-            models_dir / "faster-whisper-large-v3",
-            models_dir / "models--Systran--faster-whisper-large-v3",
-            Path("models/faster-whisper-large-v3"),
-            Path("models/models--Systran--faster-whisper-large-v3"),
-        ]
+        candidates = []
+        for b in search_bases:
+            candidates.append(b / "faster-whisper-large-v3")
+            candidates.append(b / "models--Systran--faster-whisper-large-v3")
+        candidates.append(Path("models/faster-whisper-large-v3"))
+        candidates.append(Path("models/models--Systran--faster-whisper-large-v3"))
         for c in candidates:
             if c.is_dir():
                 for target_file in [c / "model.bin", c / "model.safetensors"]:
@@ -377,14 +378,14 @@ def is_component_ready(pkg_id: str) -> Tuple[bool, str]:
         return False, "Chưa tải"
 
     if pkg_id == "vieneu_tts_voices":
-        candidates = [
-            models_dir / "hf" / "hub" / "models--pnnbao-ump--VieNeu-TTS-v3-Turbo",
-            Path.home() / ".cache" / "huggingface" / "hub" / "models--pnnbao-ump--VieNeu-TTS-v3-Turbo",
-            models_dir / "vieneu",
-            models_dir / "neu-tts",
-            Path("models/vieneu"),
-            Path("models/neu-tts"),
-        ]
+        candidates = []
+        for b in search_bases:
+            candidates.append(b / "hf" / "hub" / "models--pnnbao-ump--VieNeu-TTS-v3-Turbo")
+            candidates.append(b / "vieneu")
+            candidates.append(b / "neu-tts")
+        candidates.append(Path.home() / ".cache" / "huggingface" / "hub" / "models--pnnbao-ump--VieNeu-TTS-v3-Turbo")
+        candidates.append(Path("models/vieneu"))
+        candidates.append(Path("models/neu-tts"))
         for c in candidates:
             if c.exists() and (any(c.glob("snapshots/*")) or any(c.glob("*.onnx")) or any(c.glob("*.pt")) or any(c.glob("*.safetensors"))):
                 return True, "Đã sẵn sàng"

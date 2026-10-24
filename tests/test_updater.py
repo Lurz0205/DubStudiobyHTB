@@ -2,7 +2,14 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from dubstudio.updater import parse_semver, check_all_updates, repair_and_clean_cache, CURRENT_VERSION
+from dubstudio.updater import (
+    parse_semver,
+    check_all_updates,
+    repair_and_clean_cache,
+    cleanup_update_artifacts,
+    verify_file_checksum,
+    CURRENT_VERSION,
+)
 
 
 def test_parse_semver():
@@ -71,3 +78,57 @@ def test_repair_and_clean_cache():
     assert res["status"] == "ok"
     assert "freed_mb" in res
     assert isinstance(res["cleaned_items"], list)
+
+
+def test_cleanup_update_artifacts(tmp_path, monkeypatch):
+    # Setup mock Velopack packages directory
+    fake_local = tmp_path / "LocalAppData"
+    fake_pkg_dir = fake_local / "DubStudio" / "packages"
+    fake_pkg_dir.mkdir(parents=True)
+
+    # 1. Obsolete delta package (from 1.1.0) -> must be deleted
+    old_delta = fake_pkg_dir / "DubStudio-1.1.0-delta.nupkg"
+    old_delta.write_bytes(b"old delta bytes" * 100)
+
+    # 2. Obsolete full package (from 1.1.0) -> must be deleted
+    old_full = fake_pkg_dir / "DubStudio-1.1.0-full.nupkg"
+    old_full.write_bytes(b"old full bytes" * 100)
+
+    # 3. Current full package -> MUST BE PRESERVED
+    curr_clean = CURRENT_VERSION.lstrip("v")
+    curr_full = fake_pkg_dir / f"DubStudio-{curr_clean}-full.nupkg"
+    curr_full.write_bytes(b"current full bytes" * 100)
+
+    # 4. Index file -> MUST BE PRESERVED
+    releases_idx = fake_pkg_dir / "RELEASES"
+    releases_idx.write_text("index content", encoding="utf-8")
+
+    # 5. Velopack temp extraction folder -> must be deleted
+    temp_extract = fake_pkg_dir / "VelopackTemp_12345"
+    temp_extract.mkdir()
+    (temp_extract / "temp.dll").write_bytes(b"dummy dll" * 50)
+
+    monkeypatch.setenv("LOCALAPPDATA", str(fake_local))
+
+    res = cleanup_update_artifacts()
+    assert res["status"] == "ok"
+
+    # Verify expectations
+    assert not old_delta.exists(), "Old delta must be deleted"
+    assert not old_full.exists(), "Old full package must be deleted"
+    assert not temp_extract.exists(), "VelopackTemp folder must be deleted"
+    assert curr_full.exists(), "Current full package must be preserved"
+    assert releases_idx.exists(), "RELEASES index must be preserved"
+
+
+def test_verify_file_checksum(tmp_path):
+    import hashlib
+    test_file = tmp_path / "test.nupkg"
+    content = b"Hello Velopack Delta Update Verification!"
+    test_file.write_bytes(content)
+
+    correct_sha = hashlib.sha256(content).hexdigest()
+    assert verify_file_checksum(test_file, expected_sha256=correct_sha, expected_size=len(content))
+    assert not verify_file_checksum(test_file, expected_sha256="wrongsha", expected_size=len(content))
+    assert not verify_file_checksum(test_file, expected_sha256=correct_sha, expected_size=999999)
+

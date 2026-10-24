@@ -70,15 +70,17 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
             from funasr import AutoModel
             from funasr.utils.postprocess_utils import rich_transcription_postprocess
 
-            from dubstudio.paths import get_models_dir, get_app_dir
+            from dubstudio.paths import get_models_dir, get_app_dir, get_model_search_paths
             models_root = get_models_dir()
-            candidates = [
-                models_root / "SenseVoiceSmall",
+            candidates = []
+            for b in get_model_search_paths():
+                candidates.append(b / "SenseVoiceSmall")
+            candidates.extend([
                 Path("models/SenseVoiceSmall"),
                 get_app_dir() / "models" / "SenseVoiceSmall",
                 Path(sys.executable).parent / "models" / "SenseVoiceSmall",
                 Path(sys.executable).parent.parent / "models" / "SenseVoiceSmall",
-            ]
+            ])
             model_dir = next(
                 (c for c in candidates if (c / "model.pt").is_file() and (c / "model.pt").stat().st_size > 100 * 1024 * 1024),
                 None
@@ -204,16 +206,18 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
 
         else:
             from faster_whisper import WhisperModel
-            from dubstudio.paths import get_models_dir
+            from dubstudio.paths import get_models_dir, get_model_search_paths
             models_root = get_models_dir()
             model_size = cfg.asr.model_size
-            local_candidates = [
-                models_root / f"models--Systran--faster-whisper-{model_size}",
-                models_root / f"faster-whisper-{model_size}",
-                models_root / model_size,
+            local_candidates = []
+            for b in get_model_search_paths():
+                local_candidates.append(b / f"models--Systran--faster-whisper-{model_size}")
+                local_candidates.append(b / f"faster-whisper-{model_size}")
+                local_candidates.append(b / model_size)
+            local_candidates.extend([
                 Path(f"models/models--Systran--faster-whisper-{model_size}"),
                 Path(f"models/{model_size}"),
-            ]
+            ])
             from dubstudio.components import is_component_ready
             ready, _ = is_component_ready("whisper_large_v3")
             if not ready:

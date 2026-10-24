@@ -1,16 +1,18 @@
 # PROGRESS.md — DubStudio Progress
 
 ## Đã hoàn thành (Done)
-- **Sửa dứt điểm lỗi xuất video (500 Server Error) & lỗi port 127.0.0.1:**
-  - Tìm ra nguyên nhân: Hàm `render_job_video` trong `dubstudio/api/app.py` thiếu khai báo `cfg = AppConfig.load()`, làm phát sinh ngoại lệ `NameError: name 'cfg' is not defined` khi lấy đường dẫn xuất video.
-  - Sửa toàn diện `app.py`: Đã bổ sung `cfg = AppConfig.load()` cho tất cả các endpoint liên quan (`render_job_video`, `split_segment`, `regenerate_segment_tts`) và thay thế `logger` bằng `_api_logger`.
-  - Khắc phục `ui/workers.py`:
-    + Cấu hình `TestClient(app, raise_server_exceptions=False)` trong In-Memory ASGI Bridge, trả về đầy đủ mã lỗi và dữ liệu phản hồi thay vì làm sập tiến trình gọi hoặc fallback sang TCP socket.
-    + Trích xuất thông điệp tiếng Việt thân thiện (`message_vi`) và loại bỏ hoàn toàn các chuỗi URL IP/Port khỏi thông báo lỗi người dùng.
-- **Xác thực toàn diện quy trình:**
-  - Test trực tiếp 5 luồng cốt lõi (Cài đặt, Danh sách tác vụ, Chi tiết tác vụ, Quản lý phụ đề, Xuất video) đều đạt 200 OK.
-  - Video mẫu `out/24102026_vi.mp4` được kết xuất hoàn chỉnh thành công.
-- 100% kiểm thử tự động đã vượt qua (`164/164 passed`). Đã đồng bộ mã nguồn sang `dist/`.
+- **Kiểm toán minh bạch Tag-to-Tag & Khóa chặt Delta Updater (Mục 1-7):**
+  - Hoàn thành `scripts/audit_release_diff.py`: Đối chiếu 100% mã nguồn tag-to-tag (`v1.1.2` -> HEAD), tự động xuất `RELEASE_AUDIT.md`.
+  - Tích hợp kiểm toán vào `scripts/push_code_to_github.py` và Verification Gate bắt buộc có `*-delta.nupkg` trong GitHub Actions.
+  - Bảo vệ `current/` với `PYTHONDONTWRITEBYTECODE=1`; phân luồng updater độc lập cho Velopack Delta; cơ chế tự dọn rác thừa `cleanup_update_artifacts()`.
+  - Thực nghiệm đóng gói với `vpk`: Gói delta đạt 3.06 KB (tiết kiệm 99.9% dung lượng), tái tạo nhị phân khớp 100% SHA-256.
+- **Bảo toàn & Di chuyển Mô hình AI Đa Đường Dẫn (Mục 8):**
+  - Nâng cấp `migrate_legacy_user_data` trong `dubstudio/paths.py`: Quét & gom File-by-File an toàn từ `%LocalAppData%\DubStudio` và `current\models` sang `%LocalAppData%\DubStudioData`.
+  - Chống `FileExistsError`, so sánh kích thước file (giữ bản lớn/đầy đủ hơn, xóa file thừa tránh nhân đôi dung lượng), dọn sạch thư mục cũ.
+  - Path Rebinding: Tự động viết lại đường dẫn tuyệt đối trong `installed.json`, `config.toml`, `settings.json` và đồng bộ registry.
+  - Fallback Đa Đường Dẫn: Bổ sung `get_model_search_paths()`, `find_model_file()`, `find_model_dir()`, cập nhật `separate.py`, `asr.py`, `components.py`.
+  - Tạo 5 bài test tự động `tests/test_model_migration.py`.
+- **Chất lượng:** Toàn bộ bộ kiểm thử 171/171 tests passed (100%). Đã đồng bộ sang `dist/`.
 
 ## Tiếp theo (Next)
 - Đóng gói và phát hành bản vá mới khi người dùng yêu cầu.

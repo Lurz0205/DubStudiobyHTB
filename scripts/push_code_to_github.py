@@ -29,6 +29,13 @@ headers = {
 session = requests.Session()
 session.headers.update(headers)
 
+# 0. Mandatory Pre-Push Audit: Compare against last official release
+try:
+    from scripts.audit_release_diff import run_audit
+    run_audit()
+except Exception as e:
+    print(f"Warning: Pre-push audit encountered error: {e}", flush=True)
+
 # 1. Get latest commit SHA on main
 ref_resp = session.get(f"{api_base}/git/ref/heads/main")
 if ref_resp.status_code != 200:

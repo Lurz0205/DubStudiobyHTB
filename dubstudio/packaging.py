@@ -61,12 +61,20 @@ def get_user_data_dir() -> Path:
 
 
 def get_models_dir(default_dir: Path | None = None) -> Path:
-    """Return models directory depending on packaged vs dev mode."""
-    if is_packaged():
-        p = get_user_data_dir() / "models"
-        p.mkdir(parents=True, exist_ok=True)
+    """Return centralized models directory in DubStudioData, falling back to default."""
+    from dubstudio.paths import get_models_dir as _paths_get_models_dir
+    p = _paths_get_models_dir()
+    if p.exists():
         return p
-    return default_dir or Path("models")
+    if default_dir:
+        return default_dir
+    return p
+
+
+def get_model_search_paths() -> list[Path]:
+    """Return ordered list of directories to search for AI models."""
+    from dubstudio.paths import get_model_search_paths as _paths_get_search_paths
+    return _paths_get_search_paths()
 
 
 def get_runtime_python() -> Path:

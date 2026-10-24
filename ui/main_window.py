@@ -271,6 +271,18 @@ class MainWindow(QMainWindow):
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(1500, self._start_startup_update_check)
 
+        # Zero-Leftover Garbage Collector: clean update artifacts and temp files 3s after startup
+        QTimer.singleShot(3000, self._run_background_cleanup)
+
+    def _run_background_cleanup(self):
+        """Asynchronously clean stale update artifacts and temp files without freezing GUI."""
+        import threading
+        try:
+            from dubstudio.updater import cleanup_update_artifacts
+            threading.Thread(target=cleanup_update_artifacts, daemon=True).start()
+        except Exception:
+            pass
+
     def _on_cta_create_project(self):
         """Action when clicking '+ Tạo dự án mới' on sidebar."""
         self._on_nav_clicked(0)
@@ -667,14 +679,25 @@ class MainWindow(QMainWindow):
                 current_pid = os.getpid()
                 target_exe = sys.executable
 
-                if mgr and info:
-                    mgr.apply_updates_and_restart(info)
+                mode = result.get("mode") if result else None
+                if (mode == "velopack_delta" or (mgr and info)) and mgr and info:
+                    # TẦNG 1: Gói cập nhật vi sai (Velopack Delta) — Áp dụng trực tiếp qua Velopack
+                    # Tuyệt đối không gọi Setup.exe -s khi Tầng 1 đã tải thành công
+                    try:
+                        mgr.apply_updates_and_restart(info)
+                    except Exception:
+                        from dubstudio.paths import get_app_dir
+                        from dubstudio.win_job import launch_breakaway_process
+                        update_exe = get_app_dir().parent / "Update.exe"
+                        if update_exe.exists():
+                            cmd = [str(update_exe), "apply", "--waitPid", str(current_pid), "--restart"]
+                            launch_breakaway_process(cmd)
                     app_inst = QApplication.instance()
                     if app_inst:
                         app_inst.quit()
                     os._exit(0)
                 elif installer:
-                    # PowerShell wait-process on current PID up to 10s, then silent Setup.exe -s, then relaunch
+                    # TẦNG 2: Fallback Setup.exe -s (chỉ kích hoạt khi Tầng 1 không khả dụng hoặc lỗi)
                     ps_cmd = (
                         f"$pid_wait = {current_pid}; "
                         f"Wait-Process -Id $pid_wait -Timeout 10 -ErrorAction SilentlyContinue; "

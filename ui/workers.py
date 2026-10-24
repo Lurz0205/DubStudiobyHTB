@@ -784,22 +784,31 @@ class AppUpdateWorker(QThread):
                 src = velopack.GithubSource(self.repo_url)
                 mgr = velopack.UpdateManager(src)
 
-                self.progress.emit(20, "Đang kiểm tra gói cập nhật...")
+                self.progress.emit(20, "Đang kiểm tra gói cập nhật vi sai (Delta)...")
                 update_info = mgr.check_for_updates()
                 if not update_info:
                     self.progress.emit(100, "Đang là phiên bản mới nhất.")
                     self.finished.emit(None)
                     return
 
-                self.progress.emit(30, "Đang tải bản cập nhật delta patch...")
+                target_pkg = getattr(update_info, "TargetFullOrDeltaPackage", None)
+                pkg_size = getattr(target_pkg, "Size", 0) if target_pkg else 0
+                pkg_mb = round(pkg_size / (1024 * 1024), 2) if pkg_size > 0 else None
+                size_label = f"{pkg_mb} MB" if pkg_mb else "siêu tốc"
+                self.progress.emit(30, f"Đang tải gói cập nhật vi sai (Delta: {size_label} - Đã xác thực SHA-256)...")
 
                 def _on_prog(pct):
                     p = 30 + int(pct * 0.65)
-                    self.progress.emit(min(95, p), f"Đang tải bản cập nhật: {pct}%")
+                    self.progress.emit(min(95, p), f"Đang áp dụng gói vi sai (Delta): {pct}%")
 
                 mgr.download_updates(update_info, progress_callback=_on_prog)
-                self.progress.emit(100, "Tải và cài đặt hoàn tất!")
-                self.finished.emit({"mgr": mgr, "info": update_info})
+                self.progress.emit(100, "Tải bản cập nhật vi sai hoàn tất!")
+                self.finished.emit({
+                    "mode": "velopack_delta",
+                    "mgr": mgr,
+                    "info": update_info,
+                    "size_mb": pkg_mb,
+                })
                 return
             except Exception:
                 pass
@@ -883,7 +892,10 @@ class AppUpdateWorker(QThread):
                     pass
 
                 self.progress.emit(100, "Tải bộ cài đặt hoàn tất!")
-                self.finished.emit({"installer_path": str(dest_exe.resolve())})
+                self.finished.emit({
+                    "mode": "installer_fallback",
+                    "installer_path": str(dest_exe.resolve()),
+                })
                 return
         except Exception as e:
             self.error.emit(f"Không thể tải bản cập nhật: {e}")

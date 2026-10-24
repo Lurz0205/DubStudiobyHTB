@@ -58,10 +58,11 @@ if (Test-Path "$Root\dubstudio.ico") {
 # Create Velopack release package
 $Vpk = "$env:USERPROFILE\.dotnet\tools\vpk.exe"
 if (Test-Path $Vpk) {
-    Write-Host "Packaging with Velopack into dist\releases..." -ForegroundColor Cyan
+    $Version = (& $Py -c "from dubstudio.version import APP_VERSION; print(APP_VERSION)").Trim()
+    Write-Host "Packaging with Velopack (v$Version) into dist\releases..." -ForegroundColor Cyan
     & $Vpk pack `
         --packId DubStudio `
-        --packVersion 1.0.1 `
+        --packVersion $Version `
         --packTitle "DubStudio" `
         --packAuthors "DubStudio Team" `
         --packDir "$Root\dist\DubStudio" `

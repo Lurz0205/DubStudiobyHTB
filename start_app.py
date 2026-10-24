@@ -1,5 +1,10 @@
 import os
 import sys
+
+# 0. Strict bytecode suppression to prevent writing .pyc / __pycache__ into current/ install directory
+sys.dont_write_bytecode = True
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
 import multiprocessing
 
 # 1. Environment & Subsystem Guards

@@ -38,89 +38,234 @@ def get_resource_dir() -> Path:
     return get_app_dir()
 
 
-def migrate_legacy_user_data(legacy_dir: Optional[Path] = None, target_dir: Optional[Path] = None) -> None:
+def _merge_move_dir(src_dir: Path, dst_dir: Path) -> None:
     """
-    Safely migrate legacy user data (%LocalAppData%\\DubStudio) to (%LocalAppData%\\DubStudioData).
-    Ensures user models (1.5GB+), logs, and configs are never wiped or conflicted with Velopack installation binaries.
+    Safely merge-move all files from src_dir into dst_dir file-by-file.
+    1. Prevents FileExistsError by creating subdirectories on demand rather than moving whole tree.
+    2. Compares file sizes: if src_file is larger or dst_file is missing, writes src into dst.
+       If dst_file already has equal or larger size, safely deletes redundant src duplicate.
+    3. Recursively removes empty source directories after migration to eliminate disk bloat.
     """
-    if legacy_dir is None or target_dir is None:
-        if sys.platform == "win32":
-            base = os.environ.get("LOCALAPPDATA")
-            if base:
-                legacy_dir = Path(base) / "DubStudio"
-                target_dir = Path(base) / "DubStudioData"
-        if legacy_dir is None or target_dir is None:
-            legacy_dir = Path.home() / ".dubstudio"
-            target_dir = Path.home() / ".dubstudio_data"
-
+    if not src_dir.exists() or not src_dir.is_dir():
+        return
     try:
-        if not legacy_dir.exists() or legacy_dir.resolve() == target_dir.resolve():
+        if src_dir.resolve() == dst_dir.resolve():
             return
     except Exception:
         return
 
-    items_to_migrate = [
-        "models",
-        "components",
-        "workspace",
-        "logs",
-        "out",
-        "runtime",
-        "data",
-        "cache",
-        "installed.json",
-        ".first_run_done",
-        "config.toml",
+    dst_dir.mkdir(parents=True, exist_ok=True)
+
+    for root, dirs, files in os.walk(str(src_dir)):
+        root_path = Path(root)
+        try:
+            rel_root = root_path.relative_to(src_dir)
+        except Exception:
+            continue
+        target_root = dst_dir / rel_root
+        target_root.mkdir(parents=True, exist_ok=True)
+
+        for filename in files:
+            src_file = root_path / filename
+            dst_file = target_root / filename
+
+            try:
+                if not dst_file.exists():
+                    shutil.move(str(src_file), str(dst_file))
+                else:
+                    src_size = src_file.stat().st_size
+                    dst_size = dst_file.stat().st_size
+                    if src_size > dst_size:
+                        temp_dst = dst_file.with_name(f"{dst_file.name}.tmp_{int(time.time()*1000)}")
+                        shutil.move(str(src_file), str(temp_dst))
+                        dst_file.unlink(missing_ok=True)
+                        temp_dst.replace(dst_file)
+                    else:
+                        src_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    # Clean up empty source directories from bottom up
+    try:
+        for root, dirs, files in os.walk(str(src_dir), topdown=False):
+            p = Path(root)
+            try:
+                if p.exists() and not any(p.iterdir()):
+                    p.rmdir()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _rebind_config_paths(target_dir: Path, legacy_bases: list[Path]) -> None:
+    """
+    Rewrite absolute paths in config/state files pointing to legacy directories
+    (e.g. ...\\DubStudio\\models\\...) so they point to %LocalAppData%\\DubStudioData.
+    """
+    target_str = str(target_dir.resolve())
+    target_str_fwd = target_str.replace("\\", "/")
+
+    files_to_check = [
+        target_dir / "components" / "installed.json",
+        target_dir / "installed.json",
+        target_dir / "config.toml",
+        target_dir / "settings.json",
+        target_dir / "components_state.json",
     ]
 
-    _mkdir_retry(target_dir)
-
-    for item_name in items_to_migrate:
-        src = legacy_dir / item_name
-        dst = target_dir / item_name
-        if not src.exists():
+    for cfg_file in files_to_check:
+        if not cfg_file.exists() or not cfg_file.is_file():
             continue
         try:
-            if not dst.exists():
-                shutil.move(str(src), str(dst))
-            elif src.is_dir() and dst.is_dir():
-                for sub in list(src.rglob("*")):
-                    if sub.is_file():
-                        rel = sub.relative_to(src)
-                        target_file = dst / rel
-                        target_file.parent.mkdir(parents=True, exist_ok=True)
-                        if not target_file.exists():
-                            try:
-                                shutil.move(str(sub), str(target_file))
-                            except Exception:
-                                pass
-                        else:
-                            try:
-                                sub.unlink()
-                            except Exception:
-                                pass
-                try:
-                    shutil.rmtree(str(src), ignore_errors=True)
-                except Exception:
-                    pass
-            elif src.is_file():
-                try:
-                    src.unlink()
-                except Exception:
-                    pass
+            content = cfg_file.read_text(encoding="utf-8")
+            original_content = content
+
+            for leg in legacy_bases:
+                leg_str = str(leg.resolve())
+                leg_str_fwd = leg_str.replace("\\", "/")
+
+                for sub in ("models", "components", "runtime", "workspace", "data", "cache", "logs", "out"):
+                    content = content.replace(f"{leg_str}\\{sub}", f"{target_str}\\{sub}")
+                    content = content.replace(f"{leg_str_fwd}/{sub}", f"{target_str_fwd}/{sub}")
+                    leg_esc = leg_str.replace("\\", "\\\\")
+                    target_esc = target_str.replace("\\", "\\\\")
+                    content = content.replace(f"{leg_esc}\\\\{sub}", f"{target_esc}\\\\{sub}")
+
+            if content != original_content:
+                cfg_file.write_text(content, encoding="utf-8")
         except Exception:
             pass
 
-    # Clean legacy folder ONLY if it has NO Velopack metadata
-    velopack_markers = ["current", "packages", "Update.exe", "sq.version", "app.ico", "DubStudio.exe"]
-    has_velopack = any((legacy_dir / m).exists() for m in velopack_markers)
-    if not has_velopack:
-        try:
-            remaining = [p for p in legacy_dir.iterdir() if p.name not in (".", "..")]
-            if not remaining:
-                legacy_dir.rmdir()
-        except Exception:
-            pass
+
+_IS_MIGRATING = False
+_MIGRATION_DONE = False
+
+
+def migrate_legacy_user_data(legacy_dir: Optional[Path] = None, target_dir: Optional[Path] = None) -> None:
+    """
+    Safely migrate legacy user data (%LocalAppData%\\DubStudio, current\\models, etc.)
+    to (%LocalAppData%\\DubStudioData).
+    Ensures user models (1.5GB+), logs, and configs are never wiped or duplicated.
+    File-by-file merge-move prevents FileExistsError and rebinds configuration paths.
+    """
+    global _IS_MIGRATING, _MIGRATION_DONE
+    if _IS_MIGRATING:
+        return
+    if legacy_dir is None and _MIGRATION_DONE:
+        return
+
+    _IS_MIGRATING = True
+    try:
+        default_mode = (legacy_dir is None or target_dir is None)
+        if default_mode:
+            if sys.platform == "win32":
+                base = os.environ.get("LOCALAPPDATA")
+                if base:
+                    target_dir = Path(base) / "DubStudioData"
+            if target_dir is None:
+                target_dir = Path.home() / ".dubstudio_data"
+
+        _mkdir_retry(target_dir)
+
+        legacy_sources: list[Path] = []
+        if legacy_dir is not None:
+            legacy_sources.append(legacy_dir)
+        else:
+            if sys.platform == "win32":
+                base = os.environ.get("LOCALAPPDATA")
+                if base:
+                    legacy_sources.append(Path(base) / "DubStudio")
+                    legacy_sources.append(Path(base) / "DubStudio" / "current")
+            else:
+                legacy_sources.append(Path.home() / ".dubstudio")
+
+            if is_packaged():
+                app_dir = get_app_dir()
+                try:
+                    if app_dir.resolve() != target_dir.resolve():
+                        legacy_sources.append(app_dir)
+                except Exception:
+                    pass
+
+        items_to_migrate = [
+            "models",
+            "components",
+            "workspace",
+            "logs",
+            "out",
+            "runtime",
+            "data",
+            "cache",
+            "installed.json",
+            ".first_run_done",
+            "config.toml",
+            "settings.json",
+            "components_state.json",
+        ]
+
+        for src_base in legacy_sources:
+            try:
+                if not src_base.exists() or src_base.resolve() == target_dir.resolve():
+                    continue
+            except Exception:
+                continue
+
+            for item_name in items_to_migrate:
+                src = src_base / item_name
+                if not src.exists():
+                    continue
+
+                dst = target_dir / item_name
+                if item_name == "installed.json" and (target_dir / "components").exists():
+                    dst = target_dir / "components" / "installed.json"
+
+                try:
+                    if src.is_dir():
+                        _merge_move_dir(src, dst)
+                    elif src.is_file():
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        if not dst.exists():
+                            shutil.move(str(src), str(dst))
+                        else:
+                            src_size = src.stat().st_size
+                            dst_size = dst.stat().st_size
+                            if src_size > dst_size:
+                                temp_dst = dst.with_name(f"{dst.name}.tmp_{int(time.time()*1000)}")
+                                shutil.move(str(src), str(temp_dst))
+                                dst.unlink(missing_ok=True)
+                                temp_dst.replace(dst)
+                            else:
+                                src.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+            # Clean legacy folder ONLY if it has NO Velopack metadata and no active files
+            velopack_markers = ["current", "packages", "Update.exe", "sq.version", "app.ico", "DubStudio.exe"]
+            has_velopack = any((src_base / m).exists() for m in velopack_markers)
+            if not has_velopack:
+                try:
+                    remaining = [p for p in src_base.iterdir() if p.name not in (".", "..")]
+                    if not remaining:
+                        src_base.rmdir()
+                except Exception:
+                    pass
+
+        # Rebind legacy paths in configuration and installed component records
+        _rebind_config_paths(target_dir, legacy_sources)
+
+        if default_mode:
+            _MIGRATION_DONE = True
+            # Sync installed components registry if components module is loaded
+            try:
+                import sys
+                if "dubstudio.components" in sys.modules:
+                    from dubstudio.components import sync_installed_components
+                    sync_installed_components()
+            except Exception:
+                pass
+    finally:
+        _IS_MIGRATING = False
 
 
 def get_user_base_dir() -> Path:
@@ -164,10 +309,67 @@ def get_data_dir() -> Path:
 
 
 def get_models_dir() -> Path:
-    """Return %LocalAppData%\\DubStudio\\models (shared between dev and packaged)."""
+    """Return %LocalAppData%\\DubStudioData\\models (shared between dev and packaged)."""
     d = get_user_base_dir() / "models"
     _mkdir_retry(d)
     return d
+
+
+def get_model_search_paths() -> list[Path]:
+    """
+    Return ordered list of directories to search for AI models:
+    1. Primary user models: %LocalAppData%\\DubStudioData\\models
+    2. Legacy AppData models: %LocalAppData%\\DubStudio\\models
+    3. Legacy packaged app models: %LocalAppData%\\DubStudio\\current\\models
+    4. Application/repo models: get_app_dir() / models
+    5. Current working directory: ./models
+    """
+    candidates = [
+        get_models_dir(),
+    ]
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA")
+        if base:
+            candidates.append(Path(base) / "DubStudio" / "models")
+            candidates.append(Path(base) / "DubStudio" / "current" / "models")
+    else:
+        candidates.append(Path.home() / ".dubstudio" / "models")
+
+    candidates.append(get_app_dir() / "models")
+    candidates.append(Path.cwd() / "models")
+    candidates.append(Path("models").resolve())
+
+    unique: list[Path] = [get_models_dir()]
+    seen = {get_models_dir().resolve()}
+    for c in candidates:
+        try:
+            r = c.resolve()
+            if r not in seen and r.exists() and r.is_dir():
+                seen.add(r)
+                unique.append(r)
+        except Exception:
+            pass
+    return unique
+
+
+def find_model_file(subpath: str | Path) -> Optional[Path]:
+    """Search for a model file across all candidate model directories."""
+    sub = Path(subpath)
+    for base in get_model_search_paths():
+        cand = base / sub
+        if cand.is_file():
+            return cand.resolve()
+    return None
+
+
+def find_model_dir(subpath: str | Path) -> Optional[Path]:
+    """Search for a model directory across all candidate model directories."""
+    sub = Path(subpath)
+    for base in get_model_search_paths():
+        cand = base / sub
+        if cand.is_dir():
+            return cand.resolve()
+    return None
 
 
 def get_logs_dir() -> Path:

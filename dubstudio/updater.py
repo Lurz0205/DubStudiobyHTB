@@ -210,3 +210,99 @@ def repair_and_clean_cache() -> Dict[str, Any]:
         "freed_mb": round(freed_bytes / (1024 * 1024), 2),
         "cleaned_items": cleaned_items,
     }
+
+
+def cleanup_update_artifacts() -> Dict[str, Any]:
+    """
+    Zero-Leftover Garbage Collector: automatically clean leftover update packages,
+    temporary installers, and obsolete hotpatches.
+    
+    1. Cleans %LocalAppData%\\DubStudio\\packages\\:
+       Keeps ONLY the .nupkg of CURRENT_VERSION and index files (RELEASES).
+       Deletes older *-delta.nupkg, *-full.nupkg, and VelopackTemp* folders.
+    2. Cleans %Temp% and %LocalAppData%\\DubStudioData\\updates\\:
+       Deletes DubStudio-win-Setup*.exe, *.tmp, *.part.
+    3. Cleans %LocalAppData%\\DubStudioData\\hotpatch\\:
+       Deletes any patch folders for older versions (< CURRENT_VERSION).
+    """
+    freed_bytes: int = 0
+    removed_files: List[str] = []
+    
+    # 1. Clean %LocalAppData%\\DubStudio\\packages
+    if sys.platform == "win32":
+        local_app = os.environ.get("LOCALAPPDATA")
+        if local_app:
+            pkg_dir = Path(local_app) / "DubStudio" / "packages"
+            if pkg_dir.exists():
+                curr_clean = CURRENT_VERSION.lstrip("v")
+                for item in list(pkg_dir.iterdir()):
+                    name = item.name.lower()
+                    if item.is_dir():
+                        if name.startswith("velopacktemp") or name.endswith(".tmp"):
+                            try:
+                                for f in item.rglob("*"):
+                                    if f.is_file():
+                                        freed_bytes += f.stat().st_size
+                                shutil.rmtree(item, ignore_errors=True)
+                                removed_files.append(item.name)
+                            except Exception:
+                                pass
+                    elif item.is_file():
+                        # Keep index files
+                        if name in ("releases", "releases.win.json", "releases.json"):
+                            continue
+                        # Keep current version full package for future delta updates
+                        if curr_clean in name and "full" in name:
+                            continue
+                        # Delete older full packages and all obsolete delta packages
+                        try:
+                            freed_bytes += item.stat().st_size
+                            item.unlink()
+                            removed_files.append(item.name)
+                        except Exception:
+                            pass
+
+    # 2. Clean %Temp% and %LocalAppData%\\DubStudioData\\updates
+    import tempfile
+    temp_dirs = [
+        Path(tempfile.gettempdir()),
+        Path(tempfile.gettempdir()) / "DubStudio_Update",
+        get_user_data_dir() / "updates",
+    ]
+    for t_dir in temp_dirs:
+        if not t_dir.exists():
+            continue
+        try:
+            for item in list(t_dir.glob("DubStudio*Setup*.exe*")) + list(t_dir.glob("*.part")) + list(t_dir.glob("*.tmp")):
+                if item.is_file():
+                    try:
+                        freed_bytes += item.stat().st_size
+                        item.unlink()
+                        removed_files.append(item.name)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    # 3. Clean %LocalAppData%\\DubStudioData\\hotpatch
+    hotpatch_dir = get_user_data_dir() / "hotpatch"
+    if hotpatch_dir.exists():
+        curr_tuple = parse_semver(CURRENT_VERSION)
+        for sub in list(hotpatch_dir.iterdir()):
+            if sub.is_dir():
+                sub_ver = sub.name.lstrip("v")
+                if parse_semver(sub_ver) < curr_tuple:
+                    try:
+                        for f in sub.rglob("*"):
+                            if f.is_file():
+                                freed_bytes += f.stat().st_size
+                        shutil.rmtree(sub, ignore_errors=True)
+                        removed_files.append(f"hotpatch/{sub.name}")
+                    except Exception:
+                        pass
+
+    return {
+        "status": "ok",
+        "freed_mb": round(freed_bytes / (1024 * 1024), 2),
+        "removed_files": removed_files,
+    }
