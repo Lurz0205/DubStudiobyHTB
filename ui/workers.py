@@ -12,17 +12,119 @@ from PyQt6.QtCore import QThread, pyqtSignal
 import os
 
 
+class ASGIStreamWrapper:
+    """Stream wrapper allowing requests.Response to stream ASGI responses via iter_lines/iter_content."""
+    def __init__(self, cm):
+        self.cm = cm
+        self.raw_resp = cm.__enter__()
+        self._bytes_iter = self.raw_resp.iter_bytes()
+
+    def stream(self, chunk_size=None, decode_content=None):
+        yield from self._bytes_iter
+
+    def read(self, amt=None):
+        try:
+            return next(self._bytes_iter)
+        except StopIteration:
+            return b""
+
+    def close(self):
+        try:
+            self.cm.__exit__(None, None, None)
+        except Exception:
+            pass
+
+
+class ASGIInMemoryAdapter(requests.adapters.BaseAdapter):
+    """
+    In-Memory ASGI Bridge adapter routing local HTTP requests directly to FastAPI app in RAM.
+    Bypasses Windows Firewall, antivirus proxy inspection, port collision, and socket drops.
+    """
+    def __init__(self):
+        super().__init__()
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            from starlette.testclient import TestClient
+            from dubstudio.api.app import app
+            self._client = TestClient(app)
+        return self._client
+
+    def send(self, request, stream=False, timeout=None, verify=True, cert=None, proxies=None):
+        from urllib.parse import urlparse
+        from requests.models import Response
+        import io
+
+        parsed = urlparse(request.url)
+        path = parsed.path
+        if parsed.query:
+            path += "?" + parsed.query
+
+        try:
+            client = self._get_client()
+            if stream:
+                cm = client.stream(
+                    request.method,
+                    path,
+                    content=request.body,
+                    headers=dict(request.headers),
+                )
+                raw = ASGIStreamWrapper(cm)
+                resp = Response()
+                resp.status_code = raw.raw_resp.status_code
+                resp.raw = raw
+                resp.headers.update(raw.raw_resp.headers)
+                resp.url = request.url
+                resp.reason = raw.raw_resp.reason_phrase
+                resp._content_consumed = False
+                return resp
+            else:
+                r = client.request(
+                    request.method,
+                    path,
+                    content=request.body,
+                    headers=dict(request.headers),
+                )
+                resp = Response()
+                resp.status_code = r.status_code
+                resp.raw = io.BytesIO(r.content)
+                resp.headers.update(r.headers)
+                resp.url = request.url
+                resp.reason = r.reason_phrase
+                return resp
+        except Exception:
+            # Fallback to standard HTTPAdapter if in-memory routing encounters an error
+            http_adapter = requests.adapters.HTTPAdapter()
+            return http_adapter.send(request, stream=stream, timeout=timeout, verify=verify, cert=cert, proxies=proxies)
+
+    def close(self):
+        if self._client:
+            try:
+                self._client.close()
+            except Exception:
+                pass
+            self._client = None
+
+
 _SHARED_SESSION: Optional[requests.Session] = None
 
 def get_shared_session() -> requests.Session:
-    """Return shared requests Session with trust_env=False to bypass Windows Registry proxy inspection."""
+    """Return shared requests Session with In-Memory ASGI Bridge and proxy bypass."""
     global _SHARED_SESSION
     if _SHARED_SESSION is None:
         s = requests.Session()
         s.trust_env = False
-        adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=1)
-        s.mount("http://", adapter)
-        s.mount("https://", adapter)
+
+        # 1. In-Memory ASGI Bridge for all local FastAPI endpoints (no TCP / firewall dependencies)
+        asgi_adapter = ASGIInMemoryAdapter()
+        s.mount("http://127.0.0.1", asgi_adapter)
+        s.mount("http://localhost", asgi_adapter)
+
+        # 2. Standard HTTP adapter for external network URLs (GitHub releases, downloads)
+        http_adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=1)
+        s.mount("https://", http_adapter)
+        s.mount("http://", http_adapter)
         _SHARED_SESSION = s
     return _SHARED_SESSION
 
@@ -159,9 +261,10 @@ class RunPipelineWorker(QThread):
             if self.subtitle_style:
                 payload["subtitle_style"] = self.subtitle_style
 
-            # Stream SSE events
+            # Stream SSE events via in-memory ASGI bridge
             url = f"{get_base_url()}/api/jobs/{self.job_id}/run"
-            with requests.post(url, json=payload, stream=True, timeout=1800) as resp:
+            session = get_shared_session()
+            with session.post(url, json=payload, stream=True, timeout=1800) as resp:
                 resp.raise_for_status()
                 for raw_line in resp.iter_lines():
                     if not raw_line:
@@ -231,8 +334,7 @@ class DeleteJobWorker(QThread):
 
     def run(self):
         try:
-            r = requests.delete(f"{get_base_url()}/api/jobs/{self.job_id}", timeout=15)
-            r.raise_for_status()
+            _delete(f"/api/jobs/{self.job_id}", timeout=15)
             self.finished.emit(self.job_id)
         except Exception as e:
             self.error.emit(str(e))
@@ -647,60 +749,45 @@ class AppUpdateWorker(QThread):
         repo_url: str = "https://github.com/Lurz0205/DubStudiobyHTB",
         setup_url: str = "",
         setup_size: int = 0,
+        setup_sha256: str = "",
     ):
         super().__init__()
         self.repo_url = repo_url
         self.setup_url = setup_url
         self.setup_size = setup_size
+        self.setup_sha256 = setup_sha256
 
     def run(self):
-        # 1. Try native Velopack UpdateManager (ultra fast delta packages)
-        try:
-            self.progress.emit(10, "Đang kết nối tới máy chủ GitHub...")
-            import velopack
-            src = velopack.GithubSource(self.repo_url)
-            mgr = velopack.UpdateManager(src)
+        # 1. Try native Velopack UpdateManager in packaged mode (ultra fast delta packages)
+        from dubstudio.packaging import is_packaged
+        if is_packaged():
+            try:
+                self.progress.emit(10, "Đang kết nối tới máy chủ GitHub...")
+                import velopack
+                src = velopack.GithubSource(self.repo_url)
+                mgr = velopack.UpdateManager(src)
 
-            self.progress.emit(20, "Đang kiểm tra gói cập nhật...")
-            update_info = mgr.check_for_updates()
-            if not update_info:
-                self.progress.emit(100, "Đang là phiên bản mới nhất.")
-                self.finished.emit(None)
-                return
-
-            self.progress.emit(30, "Đang tải bản cập nhật delta patch...")
-
-            def _on_prog(pct):
-                p = 30 + int(pct * 0.65)
-                self.progress.emit(min(95, p), f"Đang tải bản cập nhật: {pct}%")
-
-            mgr.download_updates(update_info, progress_callback=_on_prog)
-            self.progress.emit(100, "Tải và cài đặt hoàn tất!")
-            self.finished.emit({"mgr": mgr, "info": update_info})
-            return
-        except Exception:
-            pass
-
-        # 2. Try Velopack Update.exe if available on user machine
-        try:
-            from dubstudio.packaging import get_velopack_updater
-            updater = get_velopack_updater()
-            if updater and Path(updater).exists():
-                self.progress.emit(35, "Đang cập nhật qua Velopack Updater...")
-                import subprocess
-                proc = subprocess.Popen(
-                    [str(updater), "--update", self.repo_url],
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                )
-                proc.wait(timeout=180)
-                if proc.returncode == 0:
-                    self.progress.emit(100, "Cập nhật hoàn tất!")
-                    self.finished.emit({"fallback": True})
+                self.progress.emit(20, "Đang kiểm tra gói cập nhật...")
+                update_info = mgr.check_for_updates()
+                if not update_info:
+                    self.progress.emit(100, "Đang là phiên bản mới nhất.")
+                    self.finished.emit(None)
                     return
-        except Exception:
-            pass
 
-        # 3. Direct Installer Download Fallback (Resilient stream with atomic temp file)
+                self.progress.emit(30, "Đang tải bản cập nhật delta patch...")
+
+                def _on_prog(pct):
+                    p = 30 + int(pct * 0.65)
+                    self.progress.emit(min(95, p), f"Đang tải bản cập nhật: {pct}%")
+
+                mgr.download_updates(update_info, progress_callback=_on_prog)
+                self.progress.emit(100, "Tải và cài đặt hoàn tất!")
+                self.finished.emit({"mgr": mgr, "info": update_info})
+                return
+            except Exception:
+                pass
+
+        # 2. Direct Installer Download Fallback (Resilient stream with atomic temp file)
         try:
             import requests, tempfile
             from pathlib import Path
@@ -753,6 +840,16 @@ class AppUpdateWorker(QThread):
                                 mb_tot = total_size // (1024 * 1024)
                                 self.progress.emit(pct, f"Đang tải bộ cài: {pct}% ({mb_down} MB / {mb_tot} MB)")
 
+                # Verify downloaded installer integrity (size and SHA-256)
+                from dubstudio.updater import verify_file_checksum
+                if not verify_file_checksum(tmp_part, expected_sha256=self.setup_sha256 or None, expected_size=total_size if total_size > 1 else None):
+                    try:
+                        tmp_part.unlink()
+                    except Exception:
+                        pass
+                    self.error.emit("Bản tải về bị lỗi hoặc không khớp kích thước / mã băm SHA-256. Đã hủy bỏ để bảo đảm an toàn.")
+                    return
+
                 # Atomic swap once download finishes 100%
                 if dest_exe.exists():
                     try:
@@ -760,6 +857,13 @@ class AppUpdateWorker(QThread):
                     except Exception:
                         pass
                 tmp_part.rename(dest_exe)
+
+                # Pre-migrate user data and clean legacy install dir before launching Setup.exe
+                try:
+                    from dubstudio.paths import migrate_legacy_user_data
+                    migrate_legacy_user_data()
+                except Exception:
+                    pass
 
                 self.progress.emit(100, "Tải bộ cài đặt hoàn tất!")
                 self.finished.emit({"installer_path": str(dest_exe.resolve())})

@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 # Win32 Constants
 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x00000800
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+DETACHED_PROCESS = 0x00000008
 JobObjectExtendedLimitInformation = 9
 PROCESS_SET_QUOTA = 0x0100
 PROCESS_TERMINATE = 0x0001
@@ -99,7 +102,9 @@ def init_job_object() -> Optional[int]:
             return None
 
         info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        info.BasicLimitInformation.LimitFlags = (
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK
+        )
 
         ok = kernel32.SetInformationJobObject(
             h_job,
@@ -122,11 +127,40 @@ def init_job_object() -> Optional[int]:
             logger.info(f"AssignProcessToJobObject on main process status: {res} (err: {err})")
 
         _GLOBAL_JOB_HANDLE = h_job
-        logger.info(f"Windows Job Object initialized with KILL_ON_JOB_CLOSE (handle: {h_job})")
+        logger.info(f"Windows Job Object initialized with KILL_ON_JOB_CLOSE | BREAKAWAY_OK (handle: {h_job})")
         return _GLOBAL_JOB_HANDLE
     except Exception as e:
         logger.warning(f"Failed to initialize Windows Job Object: {e}")
         return None
+
+
+def launch_breakaway_process(cmd: Union[list[str], str], close_fds: bool = True, shell: bool = False, **kwargs) -> subprocess.Popen:
+    """Launch an independent process detached from the Job Object so it survives DubStudio exit.
+    
+    Used specifically for Update.exe, silent Setup.exe, and restart scripts.
+    """
+    sub_kwargs: dict = {
+        "close_fds": close_fds,
+        "shell": shell,
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if sys.platform == "win32":
+        creationflags = (
+            getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            | CREATE_BREAKAWAY_FROM_JOB
+            | DETACHED_PROCESS
+        )
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
+        sub_kwargs["creationflags"] = creationflags
+        sub_kwargs["startupinfo"] = si
+
+    sub_kwargs.update(kwargs)
+    return subprocess.Popen(cmd, **sub_kwargs)
+
 
 
 def assign_process_to_job(target: Union[subprocess.Popen, int]) -> bool:

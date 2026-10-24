@@ -1963,6 +1963,10 @@ def update_settings(req: SettingsRequest):
         os.environ["DEFAULT_MALE_VOICE"] = req.default_male_voice
     if req.default_female_voice is not None:
         os.environ["DEFAULT_FEMALE_VOICE"] = req.default_female_voice
+    if req.whisper_model is not None:
+        os.environ["WHISPER_MODEL"] = req.whisper_model
+    if req.separation_model is not None:
+        os.environ["SEPARATION_MODEL"] = req.separation_model
 
     # Also update config/default.toml to persist defaults
     cfg_file = Path("config/default.toml")

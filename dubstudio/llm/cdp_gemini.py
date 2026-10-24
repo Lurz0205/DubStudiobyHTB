@@ -334,7 +334,7 @@ async def _async_send_prompt_to_gemini(prompt: str, port: int = 9222, timeout: f
                            document.querySelector('div[contenteditable="true"]') ||
                            document.querySelector('textarea');
             const hasEditor = !!editor;
-            const panels = document.querySelectorAll('.markdown-main-panel');
+            const panels = document.querySelectorAll('.markdown-main-panel, message-content, model-response');
 
             return {
                 is_generating: isGenerating,
@@ -520,7 +520,7 @@ async def _async_send_prompt_to_gemini(prompt: str, port: int = 9222, timeout: f
                 }
             }
 
-            const panels = document.querySelectorAll('.markdown-main-panel');
+            const panels = document.querySelectorAll('.markdown-main-panel, message-content, model-response');
             return {
                 editor_cleared: (editorText === '' || editorText.length < 5),
                 is_generating: isGenerating,
@@ -552,62 +552,76 @@ async def _async_send_prompt_to_gemini(prompt: str, port: int = 9222, timeout: f
                 "Vui lòng kiểm tra lại trình duyệt."
             )
 
-        # 6. Monitor generation completion (concrete signs: Stop button gone + text stable)
+        # 6. Monitor generation completion exclusively on the NEW response panel
         start_wait = time.time()
         last_text = ""
         stable_ticks = 0
+        has_seen_generation = False
+
         while time.time() - start_wait < timeout:
             await asyncio.sleep(0.8)
-            monitor_js = """
-            (() => {
+            monitor_js = f"""
+            (() => {{
                 let isGenerating = false;
-                const btns = document.querySelectorAll('button, [role="button"]');
-                for (const b of btns) {
+                const btns = document.querySelectorAll('button, [role="button"], mat-icon-button, gem-icon-button');
+                for (const b of btns) {{
                     if (b.offsetParent === null) continue;
                     const aria = (b.getAttribute('aria-label') || '').toLowerCase();
                     const icon = (b.getAttribute('fonticonname') || '').toLowerCase();
-                    if (aria.includes('dừng') || aria.includes('stop') || icon.includes('stop')) {
+                    const cls = (b.className || '').toString().toLowerCase();
+                    if (aria.includes('dừng') || aria.includes('stop') || icon.includes('stop') || cls.includes('stop-button')) {{
                         isGenerating = true;
                         break;
-                    }
-                }
+                    }}
+                }}
 
                 const retryBtn = document.querySelector('button[aria-label*="Thử lại"], button[aria-label*="Retry"], button.retry-button');
                 const hasRetry = !!(retryBtn && retryBtn.offsetParent !== null && !retryBtn.disabled);
 
                 const alerts = document.querySelectorAll('[role="alert"], .error-message, .model-response-error, .network-error-message, message-actions-error');
                 let alertMsg = "";
-                for (const a of alerts) {
-                    if (a && a.offsetParent !== null) {
+                for (const a of alerts) {{
+                    if (a && a.offsetParent !== null) {{
                         const t = (a.innerText || a.textContent || "").trim();
-                        if (t) { alertMsg = t; break; }
-                    }
-                }
-
-                let targetText = "";
-                const pres = document.querySelectorAll('pre');
-                for (let i = pres.length - 1; i >= 0; i--) {
-                    const t = (pres[i].innerText || pres[i].textContent || "").trim();
-                    if (t.includes('"translations"') || t.includes('"vi"')) {
-                        targetText = t;
-                        break;
-                    }
-                }
+                        if (t) {{ alertMsg = t; break; }}
+                    }}
+                }}
 
                 const panels = document.querySelectorAll('.markdown-main-panel, message-content, model-response');
-                if (!targetText && panels.length > 0) {
-                    const lastEl = panels[panels.length - 1];
-                    targetText = lastEl ? (lastEl.textContent || lastEl.innerText || "") : "";
-                }
+                const initialCount = {initial_count};
 
-                return {
+                // If new response turn container hasn't appeared yet, wait
+                if (panels.length <= initialCount) {{
+                    return {{
+                        panel_count: panels.length,
+                        is_generating: isGenerating,
+                        has_started: false,
+                        has_retry: hasRetry,
+                        alert_msg: alertMsg,
+                        last_text: ""
+                    }};
+                }}
+
+                // Scope extraction ONLY to the newly added response panel of THIS turn!
+                const currentPanel = panels[panels.length - 1];
+                let targetText = "";
+                const pres = currentPanel.querySelectorAll('pre');
+                if (pres.length > 0) {{
+                    targetText = (pres[pres.length - 1].innerText || pres[pres.length - 1].textContent || "").trim();
+                }}
+                if (!targetText) {{
+                    targetText = (currentPanel.innerText || currentPanel.textContent || "").trim();
+                }}
+
+                return {{
                     panel_count: panels.length,
                     is_generating: isGenerating,
+                    has_started: true,
                     has_retry: hasRetry,
                     alert_msg: alertMsg,
-                    last_text: targetText.trim()
-                };
-            })()
+                    last_text: targetText
+                }};
+            }})()
             """
             status = await client.evaluate(monitor_js) or {}
 
@@ -616,30 +630,33 @@ async def _async_send_prompt_to_gemini(prompt: str, port: int = 9222, timeout: f
                 err_text = status.get("alert_msg") or "Mất kết nối hoặc quá tải (nút Thử lại xuất hiện)"
                 raise DubError(f"Gemini Web báo lỗi trong quá trình tạo câu dịch: {err_text}")
 
-            count = status.get("panel_count", 0)
             generating = status.get("is_generating", False)
+            started = status.get("has_started", False)
             text = status.get("last_text", "").strip()
 
-            has_json_structure = ('"translations"' in text or '"vi"' in text)
-            if (count > initial_count or has_json_structure) and text:
-                # Detect if response was aborted with "Bạn đã dừng câu trả lời này"
-                if "bạn đã dừng câu trả lời này" in text.lower() or "you stopped this response" in text.lower():
-                    raise DubError("Gemini Web bị gián đoạn ('Bạn đã dừng câu trả lời này'). Vui lòng bấm Dịch lại.")
+            if generating or (started and len(text) > 10):
+                has_seen_generation = True
 
-                if not generating:
-                    # Final flush wait to ensure full DOM render
-                    await asyncio.sleep(0.5)
-                    final_status = await client.evaluate(monitor_js) or {}
-                    final_text = final_status.get("last_text", "").strip() or text
-                    return final_text
+            # Wait until generation has actually commenced on the new turn
+            if not has_seen_generation:
+                continue
 
+            # Detect if response was aborted with "Bạn đã dừng câu trả lời này"
+            if "bạn đã dừng câu trả lời này" in text.lower() or "you stopped this response" in text.lower():
+                raise DubError("Gemini Web bị gián đoạn ('Bạn đã dừng câu trả lời này'). Vui lòng bấm Dịch lại.")
+
+            # Once stop button disappears and text has content
+            if not generating and len(text) > 10:
                 if text == last_text:
                     stable_ticks += 1
-                    if stable_ticks >= 4:  # Content stable for ~3.2s
+                    if stable_ticks >= 2:  # Stable for ~1.6s
                         return text
                 else:
                     stable_ticks = 0
                 last_text = text
+            elif generating:
+                last_text = text
+                stable_ticks = 0
 
         raise DubError(
             f"Quá thời gian chờ phản hồi từ Gemini Web ({int(timeout)}s). "
@@ -655,17 +672,28 @@ def extract_json_translations(raw_text: str) -> List[Dict[str, Any]]:
     if not raw_text:
         return []
 
-    # 1. Try markdown code block extraction
-    m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", raw_text)
-    candidate_str = m.group(1).strip() if m else raw_text.strip()
+    # 1. Try markdown code block extraction (check each code block from last to first)
+    code_blocks = re.findall(r"```(?:json)?\s*([\s\S]*?)\s*```", raw_text)
+    for block in reversed(code_blocks):
+        try:
+            parsed = json.loads(block.strip())
+            if isinstance(parsed, list):
+                return parsed
+            if isinstance(parsed, dict):
+                for k in ("rewritten_segments", "rewritten", "translations", "segments", "lines", "data", "items", "results"):
+                    if k in parsed and isinstance(parsed[k], list):
+                        return parsed[k]
+                return [parsed]
+        except Exception:
+            pass
 
-    # 2. Try direct JSON parse
+    # 2. Try direct JSON parse on the whole text
     try:
-        parsed = json.loads(candidate_str)
+        parsed = json.loads(raw_text.strip())
         if isinstance(parsed, list):
             return parsed
         if isinstance(parsed, dict):
-            for k in ("translations", "segments", "rewritten_segments", "rewritten", "lines", "data", "items", "results"):
+            for k in ("rewritten_segments", "rewritten", "translations", "segments", "lines", "data", "items", "results"):
                 if k in parsed and isinstance(parsed[k], list):
                     return parsed[k]
             return [parsed]
@@ -680,7 +708,7 @@ def extract_json_translations(raw_text: str) -> List[Dict[str, Any]]:
             if isinstance(parsed, list):
                 return parsed
             if isinstance(parsed, dict):
-                for k in ("translations", "segments", "rewritten_segments", "rewritten", "lines", "data", "items", "results"):
+                for k in ("rewritten_segments", "rewritten", "translations", "segments", "lines", "data", "items", "results"):
                     if k in parsed and isinstance(parsed[k], list):
                         return parsed[k]
                 return [parsed]

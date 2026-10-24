@@ -136,12 +136,14 @@ def main():
         except Exception:
             pass
 
-    # Start FastAPI server thread (with automatic port conflict fallback)
+    # Initialize In-Memory ASGI Bridge immediately for zero-network-dependence GUI operations
+    print("[DubStudio] In-Memory ASGI Bridge active (giao tiếp trực tiếp trong RAM, không phụ thuộc port mạng).")
+
+    # Start FastAPI companion listener in background (for external tools / CLI inspection if needed)
     port = find_available_port(8765)
     os.environ["DUBSTUDIO_API_PORT"] = str(port)
 
     if not is_api_healthy(port):
-        print(f"[DubStudio] Starting background API service (FastAPI) on port {port}...")
         cfg = uvicorn.Config(
             "dubstudio.api.app:app",
             host="127.0.0.1",
@@ -152,31 +154,24 @@ def main():
             access_log=False,
         )
         def _run_server():
-            try:
-                if sys.platform == "win32":
-                    import asyncio
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    srv = uvicorn.Server(cfg)
-                    loop.run_until_complete(srv.serve())
-                else:
-                    srv = uvicorn.Server(cfg)
-                    srv.run()
-            except Exception as e:
-                print(f"[DubStudio] Background API notice: {e}")
+            while True:
+                try:
+                    if sys.platform == "win32":
+                        import asyncio
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        srv = uvicorn.Server(cfg)
+                        loop.run_until_complete(srv.serve())
+                    else:
+                        srv = uvicorn.Server(cfg)
+                        srv.run()
+                except Exception as e:
+                    import logging
+                    logging.warning(f"[DubStudio] Uvicorn background thread crashed, auto-restarting in 1s: {e}")
+                    time.sleep(1.0)
 
         server_thread = threading.Thread(target=_run_server, daemon=True)
         server_thread.start()
-
-    # Wait until server is actively responding to health requests before opening GUI
-    t0 = time.time()
-    while (time.time() - t0) < 12.0:
-        if is_api_healthy(port):
-            print(f"[DubStudio] API service ready in {time.time() - t0:.2f}s (port {port})")
-            break
-        time.sleep(0.1)
-    else:
-        print(f"[DubStudio] Warning: API service took longer than 12s to respond on port {port}.")
 
     # Trigger background auto-update check via Velopack Update.exe if packaged
     def _check_auto_update():

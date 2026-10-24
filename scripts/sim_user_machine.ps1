@@ -23,8 +23,8 @@ $SimBaseDir = "$env:TEMP\DubStudio Thử Nghiệm Máy Khách"
 if (Test-Path $SimBaseDir) {
     Remove-Item -Recurse -Force $SimBaseDir -ErrorAction SilentlyContinue
 }
-New-Item -ItemType Directory -Path "$SimBaseDir\DubStudio" -Force | Out-Null
-New-Item -ItemType Directory -Path "$SimBaseDir\DubStudio\logs" -Force | Out-Null
+New-Item -ItemType Directory -Path "$SimBaseDir\DubStudioData" -Force | Out-Null
+New-Item -ItemType Directory -Path "$SimBaseDir\DubStudioData\logs" -Force | Out-Null
 
 Write-Host "[1/4] Thu muc AppData mo phong: $SimBaseDir" -ForegroundColor Yellow
 
@@ -96,7 +96,10 @@ if ($Action -ne "run") {
 }
 
 # 5. Kiem tra file log app.log duoc sinh ra
-$LogFile = "$SimBaseDir\DubStudio\logs\app.log"
+$LogFile = "$SimBaseDir\DubStudioData\logs\app.log"
+if (-not (Test-Path $LogFile) -and (Test-Path "$SimBaseDir\DubStudio\logs\app.log")) {
+    $LogFile = "$SimBaseDir\DubStudio\logs\app.log"
+}
 Write-Host "[4/4] Kiem tra file nhat ky ($LogFile)..." -ForegroundColor Yellow
 if (Test-Path $LogFile) {
     Write-Host "====================== NOI DUNG APP.LOG ======================" -ForegroundColor DarkCyan

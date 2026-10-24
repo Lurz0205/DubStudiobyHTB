@@ -543,7 +543,7 @@ class SettingsPage(QWidget):
             if female and self._combo_female.findText(female) >= 0:
                 self._combo_female.setCurrentText(female)
 
-            whisper_m = data.get("whisper_model", "large-v3")
+            whisper_m = data.get("whisper_model", "sensevoice-small")
             idx_m = self._combo_asr_model.findData(whisper_m)
             if idx_m >= 0:
                 self._combo_asr_model.setCurrentIndex(idx_m)
@@ -567,7 +567,7 @@ class SettingsPage(QWidget):
 
     def _save_settings(self):
         selected_provider = "gemini_web" if self._combo_provider.currentIndex() == 0 else "manual"
-        selected_asr = self._combo_asr_model.currentData() or "large-v3"
+        selected_asr = self._combo_asr_model.currentData() or "sensevoice-small"
         selected_sep = self._combo_sep_model.currentData() or "Kim_Vocal_2.onnx"
         payload: dict = {
             "translation_provider": selected_provider,
@@ -859,8 +859,9 @@ class SettingsPage(QWidget):
 
     def _on_asr_model_user_selected(self, idx: int):
         """Prompt and offer instant download when user interactively selects a model that is not yet ready."""
-        val = self._combo_asr_model.currentData()
-        pkg_id = "sensevoice_small" if "sensevoice" in str(val).lower() else "whisper_large_v3"
+        val = str(self._combo_asr_model.currentData() or "sensevoice-small")
+        os.environ["WHISPER_MODEL"] = val
+        pkg_id = "sensevoice_small" if "sensevoice" in val.lower() else "whisper_large_v3"
         pkg_name = "SenseVoice-Small" if pkg_id == "sensevoice_small" else "faster-whisper large-v3"
         from dubstudio.components import is_component_ready
         ready, _ = is_component_ready(pkg_id)
@@ -877,8 +878,9 @@ class SettingsPage(QWidget):
 
     def _on_sep_model_user_selected(self, idx: int):
         """Prompt and offer instant download when user interactively selects a separation model that is not yet ready."""
-        val = self._combo_sep_model.currentData()
-        pkg_id = "bs_roformer" if "roformer" in str(val).lower() else "kim_vocal_2"
+        val = str(self._combo_sep_model.currentData() or "Kim_Vocal_2.onnx")
+        os.environ["SEPARATION_MODEL"] = val
+        pkg_id = "bs_roformer" if "roformer" in val.lower() else "kim_vocal_2"
         pkg_name = "BS-RoFormer EP 317" if pkg_id == "bs_roformer" else "Kim Vocal 2"
         from dubstudio.components import is_component_ready
         ready, _ = is_component_ready(pkg_id)
@@ -892,6 +894,7 @@ class SettingsPage(QWidget):
             )
             if reply == QMessageBox.StandardButton.Yes:
                 self._trigger_download_by_pkg_id(pkg_id)
+
 
     def _download_component(self, pkg: dict, btn: QPushButton, btn_cancel: QPushButton, pbar: QProgressBar, status_badge: QLabel):
         """Launch background worker to download and install a component package with progress and cancel support."""

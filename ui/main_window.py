@@ -373,23 +373,25 @@ class MainWindow(QMainWindow):
         from dubstudio.components import is_component_ready
         from dubstudio.config import AppConfig
 
-        # 1. Determine currently chosen ASR model
-        asr_val = "sensevoice-small"
-        sep_val = "Kim_Vocal_2.onnx"
-        if hasattr(self, "_settings_page") and hasattr(self._settings_page, "_combo_asr_model"):
-            curr_asr = self._settings_page._combo_asr_model.currentData()
-            if curr_asr:
-                asr_val = curr_asr
-            curr_sep = self._settings_page._combo_sep_model.currentData()
-            if curr_sep:
-                sep_val = curr_sep
-        else:
-            try:
-                cfg = AppConfig.load()
-                asr_val = os.getenv("WHISPER_MODEL", "") or os.getenv("ASR_MODEL", "") or cfg.asr.model_size or "sensevoice-small"
-                sep_val = os.getenv("SEPARATION_MODEL", "") or getattr(getattr(cfg, "separation", None), "model_name", "Kim_Vocal_2.onnx")
-            except Exception:
-                pass
+        # Determine currently selected models with strict precedence
+        from dubstudio.config import AppConfig
+        try:
+            cfg = AppConfig.load()
+        except Exception:
+            cfg = None
+
+        asr_val = (
+            (self._settings_page._combo_asr_model.currentData() if hasattr(self, "_settings_page") and hasattr(self._settings_page, "_combo_asr_model") else None)
+            or os.getenv("WHISPER_MODEL")
+            or os.getenv("ASR_MODEL")
+            or (cfg.asr.model_size if cfg else None)
+            or "sensevoice-small"
+        )
+        sep_val = (
+            (self._settings_page._combo_sep_model.currentData() if hasattr(self, "_settings_page") and hasattr(self._settings_page, "_combo_sep_model") else None)
+            or os.getenv("SEPARATION_MODEL")
+            or (getattr(getattr(cfg, "separation", None), "model_name", "Kim_Vocal_2.onnx") if cfg else "Kim_Vocal_2.onnx")
+        )
 
         # Map ASR
         if "sensevoice" in str(asr_val).lower():
@@ -642,19 +644,58 @@ class MainWindow(QMainWindow):
                 installer = result.get("installer_path") if result else None
                 mgr = result.get("mgr") if result else None
                 info = result.get("info") if result else None
+
+                # 1. Graceful shutdown: stop workers, media players, and release locks
+                try:
+                    from dubstudio.tts.worker_server import stop_worker_server
+                    stop_worker_server()
+                except Exception:
+                    pass
+                try:
+                    if hasattr(self, "_studio_page") and hasattr(self._studio_page, "_video_player"):
+                        self._studio_page._video_player.stop()
+                except Exception:
+                    pass
+                try:
+                    from dubstudio.paths import migrate_legacy_user_data
+                    migrate_legacy_user_data()
+                except Exception:
+                    pass
+
+                # 2. Breakaway relaunch with PID wait (no file lock collisions, survives Job Object exit)
+                from dubstudio.win_job import launch_breakaway_process
+                current_pid = os.getpid()
+                target_exe = sys.executable
+
                 if mgr and info:
                     mgr.apply_updates_and_restart(info)
+                    app_inst = QApplication.instance()
+                    if app_inst:
+                        app_inst.quit()
+                    os._exit(0)
                 elif installer:
-                    subprocess.Popen(
-                        [installer],
-                        creationflags=getattr(subprocess, "DETACHED_PROCESS", 0),
+                    # PowerShell wait-process on current PID up to 10s, then silent Setup.exe -s, then relaunch
+                    ps_cmd = (
+                        f"$pid_wait = {current_pid}; "
+                        f"Wait-Process -Id $pid_wait -Timeout 10 -ErrorAction SilentlyContinue; "
+                        f"Start-Process -FilePath '{installer}' -ArgumentList '-s' -Wait; "
+                        f"Start-Process -FilePath '{target_exe}'"
                     )
+                    cmd = ["powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps_cmd]
+                    launch_breakaway_process(cmd)
                     app_inst = QApplication.instance()
                     if app_inst:
                         app_inst.quit()
                     os._exit(0)
                 else:
-                    subprocess.Popen([sys.executable])
+                    # Fallback standard restart
+                    ps_cmd = (
+                        f"$pid_wait = {current_pid}; "
+                        f"Wait-Process -Id $pid_wait -Timeout 10 -ErrorAction SilentlyContinue; "
+                        f"Start-Process -FilePath '{target_exe}'"
+                    )
+                    cmd = ["powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps_cmd]
+                    launch_breakaway_process(cmd)
                     app_inst = QApplication.instance()
                     if app_inst:
                         app_inst.quit()
@@ -664,6 +705,7 @@ class MainWindow(QMainWindow):
                 info = result.get("info") if result else None
                 if mgr and info:
                     mgr.wait_exit_then_apply_updates(info)
+
 
         def _on_error(err: str):
             progress_dlg.close()

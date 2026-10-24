@@ -88,6 +88,13 @@ if not is_cli_worker and os.environ.get("DUBSTUDIO_DISABLE_MUTEX") != "1" and sy
         # Unconditionally exit this second process to prevent duplicate GUI windows
         sys.exit(0)
 
+# 6. Apply dynamic hot-patches overriding frozen modules in RAM before full import
+try:
+    from dubstudio.hotpatch import apply_hotpatches
+    apply_hotpatches()
+except Exception:
+    pass
+
 from dubstudio.packaging import ensure_runtime_paths
 ensure_runtime_paths()
 

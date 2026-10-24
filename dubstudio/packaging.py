@@ -52,19 +52,12 @@ def is_packaged() -> bool:
 def get_user_data_dir() -> Path:
     """
     Return isolated user data directory outside application installation folder
-    (%LocalAppData%\\DubStudio).
-    Prevents user data, models, and heavy runtime packs from being overwritten during delta updates.
+    (%LocalAppData%\\DubStudioData).
+    Prevents user data, models, and heavy runtime packs from being overwritten during delta updates
+    and avoids collision with Velopack installation root (%LocalAppData%\\DubStudio).
     """
-    if sys.platform == "win32":
-        base = os.environ.get("LOCALAPPDATA")
-        if base:
-            p = Path(base) / "DubStudio"
-            p.mkdir(parents=True, exist_ok=True)
-            return p
-
-    fallback = Path.home() / ".dubstudio"
-    fallback.mkdir(parents=True, exist_ok=True)
-    return fallback
+    from dubstudio.paths import get_user_data_dir as _paths_get_user_data_dir
+    return _paths_get_user_data_dir()
 
 
 def get_models_dir(default_dir: Path | None = None) -> Path:
@@ -249,13 +242,14 @@ def get_velopack_updater() -> Optional[Path]:
     if not is_packaged():
         return None
     exe = Path(sys.executable)
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
     candidates = [
         exe.parent.parent / "Update.exe",
         exe.parent / "Update.exe",
-        get_user_data_dir().parent / "DubStudio" / "Update.exe",
+        (Path(local_app_data) / "DubStudio" / "Update.exe") if local_app_data else None,
     ]
     for c in candidates:
-        if c.exists():
+        if c and c.exists():
             return c
     return None
 

@@ -109,3 +109,77 @@ def test_resolve_isolated_pair_shifts():
     end1 = st1 + round(2.42 / 1.10, 3)
     st2 = segments[2]["start"]
     assert (end1 - st2) <= 0.10
+
+
+def test_extract_json_translations_rewritten_segments():
+    from dubstudio.llm.cdp_gemini import extract_json_translations
+
+    raw = """Sau đây là các câu đã rút gọn:
+```json
+{
+  "rewritten_segments": [
+    {
+      "id": 1,
+      "vi_text": "Nói đến màn hình gập không thể bỏ qua nếp gập.",
+      "tts_text": "Nói đến màn hình gập không thể bỏ qua nếp gập."
+    }
+  ]
+}
+```
+Hi vọng bản rút gọn này vừa vặn thời lượng.
+"""
+    items = extract_json_translations(raw)
+    assert len(items) == 1
+    assert items[0]["id"] == 1
+    assert "Nói đến màn hình gập" in items[0]["vi_text"]
+
+
+def test_fit_rewriter_cluster_normalization(cfg):
+    from dubstudio.llm.fit_rewrite import FitRewriter
+    from unittest.mock import patch
+
+    rewriter = FitRewriter(cfg)
+    mock_items = [
+        {"id": "2", "vi": "Câu dịch ngắn gọn", "tts": "Câu dịch ngắn gọn"},
+    ]
+
+    with patch.object(rewriter, "_can_use_cdp", return_value=True):
+        with patch("dubstudio.llm.cdp_gemini.translate_via_cdp", return_value=mock_items):
+            res = rewriter.rewrite_cluster(
+                [{"id": 2, "is_colliding": True, "src_text": "test", "vi_text": "Dài", "tts_text": "Dài"}],
+                analysis_data={},
+                pass_idx=2,
+            )
+            assert len(res) == 1
+            assert res[0]["id"] == 2
+            assert res[0]["vi_text"] == "Câu dịch ngắn gọn"
+            assert res[0]["tts_text"] == "Câu dịch ngắn gọn"
+
+
+def test_fit_rewriter_rewrite_units_two_way(cfg):
+    from dubstudio.llm.fit_rewrite import FitRewriter
+    from unittest.mock import patch
+
+    rewriter = FitRewriter(cfg)
+    mock_items = {
+        "rewritten_segments": [
+            {"id": 1, "vi_text": "Câu rút ngắn gọn", "tts_text": "Câu rút ngắn gọn"},
+            {"id": 2, "vi_text": "Câu được diễn đạt đầy đủ và thoáng ý hơn", "tts_text": "Câu được diễn đạt đầy đủ và thoáng ý hơn"},
+        ]
+    }
+
+    mismatched = [
+        {"id": 1, "direction": "shorter", "target_chars": 20, "zh": "短", "vi_text": "Câu này quá dài đè câu sau", "tts_dur": 3.0},
+        {"id": 2, "direction": "longer", "target_chars": 50, "zh": "长", "vi_text": "Ngắn cộc lốc", "tts_dur": 1.0},
+    ]
+
+    with patch.object(rewriter, "_can_use_cdp", return_value=True):
+        with patch("dubstudio.llm.cdp_gemini.translate_via_cdp", return_value=mock_items):
+            res = rewriter.rewrite_units(mismatched, analysis_data={}, pass_idx=1)
+            assert len(res) == 2
+            assert res[0]["id"] == 1
+            assert res[0]["vi_text"] == "Câu rút ngắn gọn"
+            assert res[1]["id"] == 2
+            assert "thoáng ý" in res[1]["vi_text"]
+
+

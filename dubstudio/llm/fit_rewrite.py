@@ -36,63 +36,111 @@ class FitRewriter:
         self,
         mismatched_units: List[Dict[str, Any]],
         analysis_data: Dict[str, Any],
-        stage_name: str = "fit_rewrite",
+        pass_idx: int = 1,
+        stage_name: str = "fit",
     ) -> List[Dict[str, Any]]:
-        """Send all mismatched units in ONE prompt to fit_rewrite.md."""
+        """Send all mismatched units in ONE prompt to fit_rewrite.md (two-way length balancing)."""
         if not mismatched_units:
             return []
 
         can_use_web = (self.provider == "gemini_web" or not self.api_key) and self._can_use_cdp()
         if not self.api_key and not can_use_web:
             emit_event(stage_name, 100.0, "Không có API key hoặc kết nối Gemini Web, bỏ qua viết lại LLM (offline fallback)", level="warning")
-            return mismatched_units
+            return []
+
+        # Pass-specific urgency directive
+        if pass_idx == 1:
+            urgency_hdr = (
+                "## [LƯỢT 1 - CÂN BẰNG THOẠI HAI CHIỀU]:\n"
+                "- Đối với câu direction='shorter': RÚT GỌN ngắn gọn hơn để số ký tự xấp xỉ hoặc dưới target_chars, loại bỏ từ đệm thừa.\n"
+                "- Đối với câu direction='longer': THOÁT Ý diễn đạt đầy đủ và thoáng hơn để câu nói tự nhiên khớp với thời lượng người nói trên hình (target_chars), không dịch cộc lốc nhưng không bịa sự kiện mới."
+            )
+        elif pass_idx == 2:
+            urgency_hdr = (
+                "## [LƯỢT 2 - YÊU CẦU RÚT GỌN MẠNH HƠN]: Lần trước câu vẫn bị dài và đè âm thanh vào câu sau! "
+                "BẮT BUỘC phải viết ngắn gọn hơn nữa, lược bỏ triệt để từ ngữ rườm rà và từ đệm thừa, giữ số ký tự dưới target_chars!"
+            )
+        else:
+            urgency_hdr = (
+                f"## [LƯỢT {pass_idx} - RÚT GỌN TỐI ĐA]: Câu vẫn đang bị đè âm thanh nghiêm trọng! "
+                "BẮT BUỘC phải cô đọng tối đa, viết câu siêu ngắn gọn và súc tích nhất có thể nhưng giữ ý chính!"
+            )
 
         # Prepare payload
         payload_items = []
         for u in mismatched_units:
+            ctx = []
+            if u.get("prev_vi"):
+                ctx.append(f"Liền trước: '{u['prev_vi']}'")
+            if u.get("next_vi"):
+                ctx.append(f"Liền sau: '{u['next_vi']}'")
+            context_str = " | ".join(ctx) if ctx else "Ngữ cảnh hội thoại"
+
             payload_items.append({
                 "id": u["id"],
                 "zh": u.get("zh", ""),
                 "vi_text": u.get("vi_text", ""),
                 "tts_text": u.get("tts_text", ""),
-                "measured_dur": u.get("tts_dur", 0.0),
-                "dur": u.get("dur", 1.0),
+                "measured_dur": u.get("measured_dur", 0.0),
+                "max_audio_dur": u.get("max_audio_dur", 1.0),
                 "direction": u.get("direction", "shorter"),
-                "target_chars": u.get("target_chars", 20),
-                "min_chars": u.get("min_chars", 15),
-                "max_chars": u.get("max_chars", 30),
-                "prev_lines": u.get("prev_lines", []),
-                "next_lines": u.get("next_lines", []),
-                "prev_vi": u.get("prev_vi", ""),
-                "next_vi": u.get("next_vi", ""),
+                "target_chars": u.get("target_chars", 25),
+                "context": context_str,
             })
 
         content_str = json.dumps(payload_items, ensure_ascii=False, indent=2)
-        prompt_hash = hashlib.sha256((self.model + ":rewrite:" + content_str).encode("utf-8")).hexdigest()
-        cache_file = self.cache_dir / f"{prompt_hash}.json"
+        template_text = ""
+        if self.prompt_template_path.exists():
+            template_text = self.prompt_template_path.read_text(encoding="utf-8")
+        elif self.cluster_prompt_path.exists():
+            template_text = self.cluster_prompt_path.read_text(encoding="utf-8")
 
-        if cache_file.exists():
-            emit_event(stage_name, 100.0, "Sử dụng bản viết lại từ cache")
-            return json.loads(cache_file.read_text(encoding="utf-8"))
-
-        template_text = self.prompt_template_path.read_text(encoding="utf-8")
-        filled_prompt = template_text.replace("{{analysis_json}}", json.dumps(analysis_data, ensure_ascii=False, indent=2))
+        filled_prompt = f"{urgency_hdr}\n\n" + template_text.replace(
+            "{{analysis_json}}", json.dumps(analysis_data or {}, ensure_ascii=False, indent=2)
+        )
         filled_prompt = filled_prompt.replace("{{lines_json}}", content_str)
+        filled_prompt = filled_prompt.replace("{{cluster_json}}", content_str)
+
+        mismatched_ids = [u["id"] for u in mismatched_units]
+        emit_event(stage_name, 30.0, f"Đang gửi {len(mismatched_units)} câu lệch #{mismatched_ids} (Lượt {pass_idx}) để cân bằng độ dài trong 1 yêu cầu duy nhất...")
+
+        def _normalize_items(raw_items: Any) -> List[Dict[str, Any]]:
+            if not raw_items:
+                return []
+            if isinstance(raw_items, dict):
+                raw_items = (
+                    raw_items.get("rewritten_segments")
+                    or raw_items.get("lines")
+                    or raw_items.get("rewritten")
+                    or raw_items.get("translations")
+                    or raw_items.get("segments")
+                    or [raw_items]
+                )
+            if not isinstance(raw_items, list):
+                return []
+            out = []
+            for it in raw_items:
+                if not isinstance(it, dict):
+                    continue
+                sid = it.get("id")
+                if sid is None:
+                    continue
+                vi_val = it.get("vi_text") or it.get("vi") or it.get("text") or it.get("shortened_vi") or ""
+                tts_val = it.get("tts_text") or it.get("tts") or it.get("spoken_text") or vi_val
+                out.append({
+                    "id": int(sid),
+                    "vi_text": sanitize_spoken_vietnamese(str(vi_val).strip()),
+                    "tts_text": sanitize_spoken_vietnamese(str(tts_val).strip()),
+                })
+            return out
 
         try:
-            emit_event(stage_name, 50.0, f"Đang gửi {len(mismatched_units)} đơn vị lệch để viết lại khớp thời lượng...")
-
             if self.provider == "gemini_web" or (not self.api_key and can_use_web):
                 from dubstudio.llm.cdp_gemini import translate_via_cdp
-                lines = translate_via_cdp(filled_prompt, port=self.cdp_port)
-                if lines:
-                    for l in lines:
-                        if "vi_text" in l:
-                            l["vi_text"] = sanitize_spoken_vietnamese(l["vi_text"])
-                        if "tts_text" in l:
-                            l["tts_text"] = sanitize_spoken_vietnamese(l["tts_text"])
-                    cache_file.write_text(json.dumps(lines, ensure_ascii=False, indent=2), encoding="utf-8")
-                    return lines
+                raw_items = translate_via_cdp(filled_prompt, port=self.cdp_port)
+                items = _normalize_items(raw_items)
+                if items:
+                    return items
 
             if self.api_key:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
@@ -102,19 +150,13 @@ class FitRewriter:
                 }
                 with httpx.Client(timeout=60.0) as client:
                     resp = client.post(url, json=payload)
-
                 if resp.status_code == 200:
                     res_json = resp.json()
                     text_content = res_json["candidates"][0]["content"]["parts"][0]["text"]
                     data = json.loads(text_content)
-                    lines = data.get("lines", []) or data.get("rewritten_segments", [])
-                    for l in lines:
-                        if "vi_text" in l:
-                            l["vi_text"] = sanitize_spoken_vietnamese(l["vi_text"])
-                        if "tts_text" in l:
-                            l["tts_text"] = sanitize_spoken_vietnamese(l["tts_text"])
-                    cache_file.write_text(json.dumps(lines, ensure_ascii=False, indent=2), encoding="utf-8")
-                    return lines
+                    items = _normalize_items(data)
+                    if items:
+                        return items
                 else:
                     emit_event(stage_name, 100.0, f"API trả về mã {resp.status_code}, giữ nguyên lời thoại", level="warning")
                     return []
@@ -127,6 +169,7 @@ class FitRewriter:
         self,
         cluster_segments: List[Dict[str, Any]],
         analysis_data: Dict[str, Any],
+        pass_idx: int = 1,
         stage_name: str = "fit",
     ) -> List[Dict[str, Any]]:
         """Rewrite colliding segments in a coherent cluster of surrounding sentences."""
@@ -148,6 +191,20 @@ class FitRewriter:
         elif self.prompt_template_path.exists():
             template_text = self.prompt_template_path.read_text(encoding="utf-8")
 
+        # Pass-specific urgency directive
+        if pass_idx == 1:
+            urgency_hdr = "## [LƯỢT 1]: Rút gọn các câu có is_colliding: true để số ký tự xấp xỉ hoặc dưới target_chars."
+        elif pass_idx == 2:
+            urgency_hdr = (
+                "## [LƯỢT 2 - YÊU CẦU RÚT GỌN MẠNH HƠN]: Lần trước câu vẫn bị dài và đè âm thanh vào câu sau! "
+                "BẮT BUỘC phải viết ngắn gọn hơn nữa, lược bỏ triệt để từ ngữ rườm rà và từ đệm thừa, giữ số ký tự dưới target_chars!"
+            )
+        else:
+            urgency_hdr = (
+                f"## [LƯỢT {pass_idx} - RÚT GỌN TỐI ĐA]: Câu vẫn đang bị đè âm thanh nghiêm trọng! "
+                "BẮT BUỘC phải cô đọng tối đa, viết câu siêu ngắn gọn và súc tích nhất có thể nhưng giữ ý chính!"
+            )
+
         # Format cluster items
         payload_items = []
         for s in cluster_segments:
@@ -163,23 +220,51 @@ class FitRewriter:
             })
 
         cluster_str = json.dumps(payload_items, ensure_ascii=False, indent=2)
-        filled_prompt = template_text.replace("{{analysis_json}}", json.dumps(analysis_data or {}, ensure_ascii=False, indent=2))
+        filled_prompt = f"{urgency_hdr}\n\n" + template_text.replace(
+            "{{analysis_json}}", json.dumps(analysis_data or {}, ensure_ascii=False, indent=2)
+        )
         filled_prompt = filled_prompt.replace("{{cluster_json}}", cluster_str)
         filled_prompt = filled_prompt.replace("{{lines_json}}", cluster_str)
 
         colliding_ids = [s["id"] for s in colliding]
-        emit_event(stage_name, 35.0, f"Đang gửi chùm câu chứa đoạn #{colliding_ids} để viết lại theo ngữ cảnh...")
+        emit_event(stage_name, 35.0, f"Đang gửi chùm câu chứa đoạn #{colliding_ids} (Lượt {pass_idx}) để viết lại theo ngữ cảnh...")
+
+        def _normalize_items(raw_items: Any) -> List[Dict[str, Any]]:
+            if not raw_items:
+                return []
+            if isinstance(raw_items, dict):
+                raw_items = (
+                    raw_items.get("rewritten_segments")
+                    or raw_items.get("rewritten")
+                    or raw_items.get("translations")
+                    or raw_items.get("lines")
+                    or raw_items.get("segments")
+                    or [raw_items]
+                )
+            if not isinstance(raw_items, list):
+                return []
+            out = []
+            for it in raw_items:
+                if not isinstance(it, dict):
+                    continue
+                sid = it.get("id")
+                if sid is None:
+                    continue
+                vi_val = it.get("vi_text") or it.get("vi") or it.get("text") or it.get("shortened_vi") or ""
+                tts_val = it.get("tts_text") or it.get("tts") or it.get("spoken_text") or vi_val
+                out.append({
+                    "id": int(sid),
+                    "vi_text": sanitize_spoken_vietnamese(str(vi_val).strip()),
+                    "tts_text": sanitize_spoken_vietnamese(str(tts_val).strip()),
+                })
+            return out
 
         try:
             if self.provider == "gemini_web" or (not self.api_key and can_use_web):
                 from dubstudio.llm.cdp_gemini import translate_via_cdp
-                items = translate_via_cdp(filled_prompt, port=self.cdp_port)
+                raw_items = translate_via_cdp(filled_prompt, port=self.cdp_port)
+                items = _normalize_items(raw_items)
                 if items:
-                    for it in items:
-                        if "vi_text" in it:
-                            it["vi_text"] = sanitize_spoken_vietnamese(it["vi_text"])
-                        if "tts_text" in it:
-                            it["tts_text"] = sanitize_spoken_vietnamese(it["tts_text"])
                     return items
 
             if self.api_key:
@@ -194,18 +279,8 @@ class FitRewriter:
                     res_json = resp.json()
                     text_content = res_json["candidates"][0]["content"]["parts"][0]["text"]
                     data = json.loads(text_content)
-                    items = (
-                        data.get("rewritten_segments")
-                        or data.get("rewritten")
-                        or data.get("lines")
-                        or (data if isinstance(data, list) else [])
-                    )
+                    items = _normalize_items(data)
                     if items:
-                        for it in items:
-                            if "vi_text" in it:
-                                it["vi_text"] = sanitize_spoken_vietnamese(it["vi_text"])
-                            if "tts_text" in it:
-                                it["tts_text"] = sanitize_spoken_vietnamese(it["tts_text"])
                         return items
         except Exception as e:
             emit_event(stage_name, 35.0, f"Lỗi khi viết lại chùm câu: {e}", level="warning")

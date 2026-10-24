@@ -197,3 +197,31 @@ def test_edit_video_crop_only():
     assert Path(data["path"]).exists()
     Path(data["path"]).unlink(missing_ok=True)
 
+
+def test_in_memory_asgi_bridge_on_closed_port(monkeypatch):
+    """Confirm UI operations succeed 100% via In-Memory ASGI Bridge even if TCP port is completely closed."""
+    # Point base URL to an arbitrary closed TCP port
+    monkeypatch.setenv("DUBSTUDIO_API_PORT", "59998")
+
+    from ui.workers import _get, _post
+    import shutil
+
+    # 1. Health check via in-memory bridge
+    health = _get("/api/health")
+    assert health["status"] == "ok"
+    assert health["app"] == "DubStudio"
+
+    # 2. Project creation via in-memory bridge without TCP
+    job_res = _post("/api/jobs/create", {"video_path": "samples/tiny.mp4", "target_lang": "vi"})
+    try:
+        assert "job_id" in job_res
+        assert Path(job_res["workspace"]).exists()
+    finally:
+        if "workspace" in job_res:
+            ws_p = Path(job_res["workspace"])
+            if ws_p.exists():
+                shutil.rmtree(ws_p, ignore_errors=True)
+
+
+
+

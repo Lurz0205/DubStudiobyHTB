@@ -1,10 +1,11 @@
 """Stage: fit. Closed-loop voice-to-picture timing algorithm with audio collision detection,
-1.0x - 1.1x tempo balancing for minor overlaps, and contextual cluster re-writing for major overlaps.
+1.0x - 1.1x tempo balancing for minor overlaps, and batch two-way length balancing (shorter/longer) via LLM.
 """
 import copy
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 from typing import Any, Dict, List, Tuple
 import numpy as np
@@ -115,10 +116,10 @@ def build_clusters(colliding_indices: List[int], segments: List[Dict[str, Any]],
     return [list(range(st, en + 1)) for st, en in merged]
 
 
-def resolve_isolated_pair_shifts(segments: List[Dict[str, Any]], video_dur: float, max_shift: float = 0.50) -> int:
+def resolve_isolated_pair_shifts(segments: List[Dict[str, Any]], video_dur: float, max_shift: float = 0.25) -> int:
     """If exactly two consecutive segments collide with each other and are isolated
-    (neither collides with outside neighbors), shift segment A backwards (up to 0.5s)
-    and segment B forwards (up to 0.5s) using available silence gaps before and after.
+    (neither collides with outside neighbors), shift segment A backwards (up to max_shift)
+    and segment B forwards (up to max_shift) using available silence gaps before and after.
     Returns the number of isolated pairs shifted.
     """
     n = len(segments)
@@ -146,7 +147,6 @@ def resolve_isolated_pair_shifts(segments: List[Dict[str, Any]], video_dur: floa
             continue
         collides_prev = (i > 0 and boundary_collides[i - 1])
         collides_next = (i + 1 < n - 1 and boundary_collides[i + 1])
-        # Only apply when exactly 2 sentences collide and no other sentence collides with them
         if not collides_prev and not collides_next:
             seg_a = segments[i]
             seg_b = segments[i + 1]
@@ -186,6 +186,153 @@ def resolve_isolated_pair_shifts(segments: List[Dict[str, Any]], video_dur: floa
                 shifted_count += 1
 
     return shifted_count
+
+
+def synthesize_fit_tts_batch(
+    items_to_synth: List[Dict[str, Any]],
+    tts_dir: Path,
+    cfg: AppConfig,
+    job_id: str = "",
+    stage_name: str = "fit",
+) -> Dict[int, float]:
+    """Synthesize TTS for a batch of rewritten items using a persistent warm worker server.
+    Falls back to API worker and single_tts if needed.
+    Returns mapping: {segment_id: duration_in_seconds}
+    """
+    if not items_to_synth:
+        return {}
+
+    results: Dict[int, float] = {}
+    from dubstudio.packaging import get_runtime_python, get_subprocess_env, get_subprocess_kwargs
+    from dubstudio.config import get_api_base_url
+
+    py_exe = get_runtime_python()
+    worker_cmd = [str(py_exe), "-m", "dubstudio.tts.worker_server"]
+    worker_proc = None
+
+    # Step 1: Attempt warm worker_server (loads model once, synthesizes in ~0.4s per line)
+    try:
+        worker_proc = subprocess.Popen(
+            worker_cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            env=get_subprocess_env(),
+            **get_subprocess_kwargs(),
+        )
+
+        init_line = worker_proc.stdout.readline() if worker_proc.stdout else ""
+        if init_line:
+            status_data = json.loads(init_line.strip())
+            if status_data.get("status") == "ready":
+                for item in items_to_synth:
+                    sid = item["id"]
+                    text = item["new_tts"]
+                    voice = item["voice"]
+                    out_path = item["out_path"]
+
+                    req = {
+                        "text": text,
+                        "voice": voice,
+                        "speed": 1.0,
+                        "out": str(out_path.resolve()),
+                    }
+                    worker_proc.stdin.write(json.dumps(req, ensure_ascii=False) + "\n")
+                    worker_proc.stdin.flush()
+
+                    resp_line = worker_proc.stdout.readline()
+                    if not resp_line:
+                        break
+                    resp = json.loads(resp_line.strip())
+                    if resp.get("status") == "ok":
+                        dur = float(resp.get("duration", 0.0))
+                        if dur > 0.05 and out_path.exists():
+                            results[sid] = dur
+
+                try:
+                    worker_proc.stdin.write(json.dumps({"cmd": "exit"}) + "\n")
+                    worker_proc.stdin.flush()
+                    worker_proc.wait(timeout=5)
+                except Exception:
+                    pass
+    except Exception as e:
+        emit_event(stage_name, 29.0, f"Worker TTS batch gặp sự cố ({e}), đang dùng phương thức phụ...", level="info")
+    finally:
+        if worker_proc and worker_proc.poll() is None:
+            try:
+                worker_proc.terminate()
+            except Exception:
+                pass
+
+    # Step 2: Fallback to active FastAPI background worker (if running)
+    unresolved = [it for it in items_to_synth if it["id"] not in results]
+    if unresolved and job_id:
+        api_base = get_api_base_url()
+        api_available = False
+        try:
+            import requests
+            r = requests.get(f"{api_base}/api/health", timeout=0.5)
+            if r.status_code == 200:
+                api_available = True
+        except Exception:
+            api_available = False
+
+        if api_available:
+            for item in list(unresolved):
+                sid = item["id"]
+                try:
+                    import requests
+                    res = requests.post(
+                        f"{api_base}/api/jobs/{job_id}/segments/{sid}/tts",
+                        json={"text": item["new_tts"], "voice": item["voice"], "speed": 1.0},
+                        timeout=90,
+                    )
+                    if res.status_code == 200:
+                        rdata = res.json()
+                        d = float(rdata.get("tts_dur", 0.0))
+                        if d > 0.05 and item["out_path"].exists():
+                            results[sid] = d
+                            unresolved.remove(item)
+                except Exception:
+                    pass
+
+    # Step 3: Fallback to standalone single_tts subprocess
+    for item in unresolved:
+        sid = item["id"]
+        tmp_out = tts_dir / f"{sid:04d}_tmp.wav"
+        try:
+            cmd = [
+                str(py_exe), "-m", "dubstudio.tts.single_tts",
+                "--text", item["new_tts"],
+                "--voice", item["voice"],
+                "--speed", "1.0",
+                "--out", str(tmp_out.resolve()),
+            ]
+            proc = subprocess.run(
+                cmd,
+                env=get_subprocess_env(),
+                capture_output=True,
+                text=True,
+                timeout=90,
+                **get_subprocess_kwargs(),
+            )
+            if proc.returncode == 0 and tmp_out.exists():
+                d = round(sf.info(str(tmp_out)).duration, 3)
+                if d > 0.05:
+                    shutil.move(str(tmp_out), str(item["out_path"]))
+                    results[sid] = d
+        except Exception as e:
+            emit_event(stage_name, 30.0, f"single_tts lỗi ở câu #{sid}: {e}", level="warning")
+        finally:
+            if tmp_out.exists():
+                try:
+                    tmp_out.unlink()
+                except Exception:
+                    pass
+
+    return results
 
 
 def run(job: JobContext, cfg: AppConfig) -> None:
@@ -234,6 +381,7 @@ def run(job: JobContext, cfg: AppConfig) -> None:
                 pass
     if video_dur <= 0.0 and segments:
         video_dur = max(float(s.get("end", 0.0)) for s in segments) + 3.0
+
     analysis_file = job.workspace / "analysis.json"
     analysis_data = {}
     if analysis_file.exists():
@@ -252,13 +400,12 @@ def run(job: JobContext, cfg: AppConfig) -> None:
             except Exception:
                 pass
 
-    # Xê dịch các cặp câu bị đè cô lập tới lui tối đa 0.5s nếu trước và sau còn trống
-    isolated_shifted = resolve_isolated_pair_shifts(segments, video_dur, max_shift=0.50)
+    # Xê dịch các cặp câu bị đè cô lập tới lui tối đa 0.25s nếu trước và sau còn trống
+    isolated_shifted = resolve_isolated_pair_shifts(segments, video_dur, max_shift=0.25)
     if isolated_shifted > 0:
-        emit_event(stage_name, 10.0, f"Đã tự động xê dịch tới/lui tối đa 0.5s cho {isolated_shifted} cặp câu bị đè cô lập vào khoảng trống yên lặng.")
+        emit_event(stage_name, 10.0, f"Đã tự động xê dịch tới/lui tối đa 0.25s cho {isolated_shifted} cặp câu bị đè cô lập vào khoảng trống yên lặng.")
 
-    # ─── 1. Multi-pass Audio Collision Detection & Contextual Cluster Rewriting ───
-    # ALLOWABLE_OVERLAP = 0.10s (cho phép đè nhẹ tối đa 0.1 giây)
+    # ─── 1. Multi-pass Two-Way Timing Balancing & Batch LLM Rewrite ───
     ALLOWABLE_OVERLAP = 0.10
     MAX_REWRITE_PASSES = 3
 
@@ -267,14 +414,8 @@ def run(job: JobContext, cfg: AppConfig) -> None:
     has_browser = bool(find_browser_executable())
 
     trans_provider = getattr(cfg.translation, "provider", "gemini_web")
-    job_conf = job.workspace / "job_config.json"
-    if job_conf.exists():
-        try:
-            jdata = json.loads(job_conf.read_text(encoding="utf-8"))
-            if jdata.get("translation_provider"):
-                trans_provider = jdata["translation_provider"]
-        except Exception:
-            pass
+    if conf.get("translation_provider"):
+        trans_provider = conf["translation_provider"]
 
     is_gemini_web = (trans_provider == "gemini_web") or is_cdp_ready(cdp_port) or has_browser
     has_api_key = bool(
@@ -285,9 +426,12 @@ def run(job: JobContext, cfg: AppConfig) -> None:
     )
     can_rewrite = has_api_key or is_gemini_web
 
+    rewriter = FitRewriter(cfg=cfg, cache_dir=job.workspace / ".cache" / "llm")
+    shrink_factors = [0.88, 0.72, 0.60]
+
     for pass_idx in range(1, MAX_REWRITE_PASSES + 1):
-        major_colliding_indices = []
-        minor_colliding_count = 0
+        shrink_factor = shrink_factors[min(pass_idx - 1, len(shrink_factors) - 1)]
+        mismatched_units: List[Dict[str, Any]] = []
 
         for idx, seg in enumerate(segments):
             st = float(seg["start"])
@@ -303,15 +447,14 @@ def run(job: JobContext, cfg: AppConfig) -> None:
             max_audio_dur = max(0.1, round(available_dur - 0.05, 3))
             raw_overlap = round(tts_dur - max_audio_dur, 3)
 
+            # Check collision (too long)
             if raw_overlap > 0.02:
-                # Check overlap remaining after applying maximum safe speedup (1.10x)
                 overlap_after_speedup = round((tts_dur / 1.10) - max_audio_dur, 3)
                 if overlap_after_speedup > ALLOWABLE_OVERLAP:
-                    # Kiểm tra khoảng trống phía trước để xê dịch tối đa 0.5s trước khi quyết định viết lại!
                     prev_end = float(segments[idx - 1]["end"]) if idx > 0 else 0.0
                     gap_before = max(0.0, st - prev_end)
                     needed_relief = overlap_after_speedup - ALLOWABLE_OVERLAP
-                    shift_back = min(0.50, gap_before, needed_relief)
+                    shift_back = min(0.25, gap_before, needed_relief)
 
                     new_st = max(0.0, round(st - shift_back, 3))
                     new_avail = max(orig_dur, round(next_st - new_st, 3))
@@ -319,190 +462,154 @@ def run(job: JobContext, cfg: AppConfig) -> None:
                     new_overlap = round((tts_dur / 1.10) - new_max_audio, 3)
 
                     if new_overlap <= ALLOWABLE_OVERLAP:
-                        # Xê dịch <= 0.5s đã giải tỏa được va chạm -> không cần viết lại!
                         seg["start"] = new_st
                         seg["voice_start"] = new_st
-                        minor_colliding_count += 1
                     else:
-                        # Major collision: vẫn đè >ALLOWABLE_OVERLAP dù đã xê dịch tối đa 0.5s -> mới gom chùm viết lại
-                        major_colliding_indices.append(idx)
-                else:
-                    minor_colliding_count += 1
+                        cps = len(seg.get("tts_text") or seg.get("vi_text", "")) / max(0.1, tts_dur)
+                        target_chars = max(10, int(round(new_max_audio * cps * shrink_factor)))
+                        mismatched_units.append({
+                            "id": seg["id"],
+                            "idx": idx,
+                            "zh": seg.get("src_text", ""),
+                            "vi_text": seg.get("vi_text", ""),
+                            "tts_text": seg.get("tts_text", ""),
+                            "measured_dur": tts_dur,
+                            "max_audio_dur": new_max_audio,
+                            "direction": "shorter",
+                            "target_chars": target_chars,
+                            "prev_vi": segments[idx - 1].get("vi_text", "") if idx > 0 else "",
+                            "next_vi": segments[idx + 1].get("vi_text", "") if idx + 1 < len(segments) else "",
+                        })
 
-        if not major_colliding_indices:
-            if pass_idx > 1:
+            # Check underflow (too short compared to speaker duration on screen) - Pass 1 only
+            elif pass_idx == 1:
+                if tts_dur < 0.65 * orig_dur and orig_dur >= 2.0 and (next_st - (st + tts_dur)) > 1.2:
+                    cps = len(seg.get("tts_text") or seg.get("vi_text", "")) / max(0.1, tts_dur)
+                    target_chars = int(round(orig_dur * cps * 0.95))
+                    mismatched_units.append({
+                        "id": seg["id"],
+                        "idx": idx,
+                        "zh": seg.get("src_text", ""),
+                        "vi_text": seg.get("vi_text", ""),
+                        "tts_text": seg.get("tts_text", ""),
+                        "measured_dur": tts_dur,
+                        "max_audio_dur": round(orig_dur, 2),
+                        "direction": "longer",
+                        "target_chars": target_chars,
+                        "prev_vi": segments[idx - 1].get("vi_text", "") if idx > 0 else "",
+                        "next_vi": segments[idx + 1].get("vi_text", "") if idx + 1 < len(segments) else "",
+                    })
+
+        # If no mismatched units need rewriting, we are done!
+        if not mismatched_units:
+            if pass_idx == 1:
+                emit_event(stage_name, 65.0, "Toàn bộ âm thanh đã vừa vặn với hình ảnh, không cần viết lại.")
+            else:
                 emit_event(
                     stage_name, 65.0,
-                    f"Hoàn thành triệt tiêu đè âm thanh sau {pass_idx - 1} lượt viết lại! Toàn bộ đều trong ngưỡng an toàn (<={ALLOWABLE_OVERLAP:.1f}s hoặc cân đối 1.0x-1.1x)."
+                    f"Hoàn thành triệt tiêu đè âm thanh sau lượt {pass_idx - 1}! Toàn bộ đều trong ngưỡng an toàn (<={ALLOWABLE_OVERLAP:.1f}s hoặc cân đối 1.0x-1.1x)."
                 )
             break
 
         if not can_rewrite:
             emit_event(
                 stage_name, 25.0,
-                f"Phát hiện {len(major_colliding_indices)} đoạn bị đè >{ALLOWABLE_OVERLAP:.1f}s nhưng không có API key LLM hoặc kết nối Gemini Web. Sẽ áp dụng tốc độ 1.0x-1.1x tối đa và ducking hòa âm.",
+                f"Phát hiện {len(mismatched_units)} đoạn cần cân bằng thời lượng nhưng không có API key LLM hoặc kết nối Gemini Web. Sẽ áp dụng tốc độ 1.0x-1.1x tối đa.",
                 level="warning"
             )
             break
 
-        # Progressively shorten more aggressively on each pass
-        shrink_factors = [0.88, 0.72, 0.60]
-        shrink_factor = shrink_factors[min(pass_idx - 1, len(shrink_factors) - 1)]
-
         emit_event(
             stage_name, 20.0 + pass_idx * 12.0,
-            f"Lượt {pass_idx}/{MAX_REWRITE_PASSES}: Phát hiện {len(major_colliding_indices)} đoạn bị đè âm thanh quá {ALLOWABLE_OVERLAP:.1f}s (>1.1x). Đang gom chùm câu để viết lại ngắn hơn (hệ số co: {shrink_factor * 100:.0f}%)..."
+            f"Lượt {pass_idx}/{MAX_REWRITE_PASSES}: Đang gửi {len(mismatched_units)} câu cần cân bằng thời lượng đến LLM trong 1 yêu cầu duy nhất..."
         )
-        clusters = build_clusters(major_colliding_indices, segments, window=2)
-        rewriter = FitRewriter(cfg=cfg, cache_dir=job.workspace / ".cache" / "llm")
 
-        all_rewritten_items = {}
-        for c_idx, cluster_indices in enumerate(clusters, start=1):
-            cluster_segs = []
-            for c_i in cluster_indices:
-                s = segments[c_i]
-                s_st = float(s["start"])
-                s_dur = max(0.1, round(float(s["end"]) - s_st, 3))
-                s_tts = float(s.get("tts_dur") or s_dur)
-                s_next = float(segments[c_i + 1]["start"]) if c_i + 1 < len(segments) else (video_dur or s_st + s_dur + 3.0)
-                s_max = max(0.1, round((s_next - s_st) - 0.05, 3))
+        # Single batch LLM call across all mismatched units
+        rewritten_list = rewriter.rewrite_units(mismatched_units, analysis_data, pass_idx=pass_idx, stage_name=stage_name)
+        rewritten_map = {item["id"]: item for item in rewritten_list if isinstance(item, dict) and item.get("id") is not None}
 
-                cps = len(s.get("tts_text") or s.get("vi_text", "")) / max(0.1, s_tts)
-                target_chars = int(round(s_max * cps * shrink_factor))
-
-                is_col = (c_i in major_colliding_indices)
-                cluster_segs.append({
-                    "id": s["id"],
-                    "zh": s.get("src_text", ""),
-                    "vi_text": s.get("vi_text", ""),
-                    "tts_text": s.get("tts_text", ""),
-                    "is_colliding": is_col,
-                    "tts_dur": s_tts,
-                    "max_audio_dur": s_max,
-                    "target_chars": target_chars,
-                })
-
-            rewritten = rewriter.rewrite_cluster(cluster_segs, analysis_data, stage_name=stage_name)
-            for item in rewritten:
-                all_rewritten_items[item["id"]] = item
-
-        if not all_rewritten_items:
+        if not rewritten_map:
+            emit_event(stage_name, 25.0 + pass_idx * 12.0, f"Lượt {pass_idx}: Không nhận được dữ liệu từ LLM, chuyển sang bước bố trí âm thanh.")
             break
 
-        emit_event(stage_name, 25.0 + pass_idx * 12.0, f"Lượt {pass_idx}: Đã viết lại {len(all_rewritten_items)} đoạn thoại. Đang tạo lại âm thanh TTS...")
-
-        # Backup original segment states for rollback if TTS generation fails
-        backup_segs = {}
-        for seg in segments:
-            sid = seg["id"]
-            if sid in all_rewritten_items:
-                backup_segs[sid] = {
-                    "vi_text": seg.get("vi_text", ""),
-                    "tts_text": seg.get("tts_text", ""),
-                    "tts_hash": seg.get("tts_hash"),
-                    "tts_dur": seg.get("tts_dur"),
-                    "voice": seg.get("voice"),
-                    "cues": copy.deepcopy(seg.get("cues")),
-                    "sub_slices": copy.deepcopy(seg.get("sub_slices")),
-                }
-
-        # Check TTS API worker availability
-        api_worker_available = False
-        from dubstudio.config import get_api_base_url, get_api_port
-        api_base = get_api_base_url()
-        try:
-            import requests
-            r = requests.get(f"{api_base}/api/health", timeout=0.5)
-            if r.status_code == 200:
-                api_worker_available = True
-        except Exception:
-            api_worker_available = False
-
-        from dubstudio.packaging import get_runtime_python, get_subprocess_env, get_subprocess_kwargs
+        # Filter strictly for segments that actually changed
+        changed_units = []
+        mismatched_ids = {u["id"] for u in mismatched_units}
 
         for seg in segments:
             sid = seg["id"]
-            if sid not in all_rewritten_items:
+            if sid not in mismatched_ids or sid not in rewritten_map:
                 continue
 
-            rew = all_rewritten_items[sid]
-            new_vi = rew.get("vi_text", seg.get("vi_text", ""))
-            new_tts = rew.get("tts_text") or normalize_for_tts(new_vi)
-            from dubstudio.tts.base import MALE_VOICES, FEMALE_VOICES
-            voice_choice = seg.get("voice")
-            if not voice_choice:
-                if detect_gender:
-                    voice_choice = male_voice if seg.get("gender") == "male" else female_voice
-                else:
-                    voice_choice = fallback_single_voice
+            rew = rewritten_map[sid]
+            new_vi = (
+                rew.get("vi_text")
+                or rew.get("vi")
+                or rew.get("text")
+                or rew.get("shortened_vi")
+                or seg.get("vi_text", "")
+            ).strip()
+            new_tts = (
+                rew.get("tts_text")
+                or rew.get("tts")
+                or rew.get("spoken_text")
+                or normalize_for_tts(new_vi)
+            ).strip()
+            orig_vi = seg.get("vi_text", "").strip()
 
-            synth_ok = False
-            new_dur = None
-            w_file = tts_dir / f"{sid:04d}.wav"
+            if new_vi and new_vi != orig_vi:
+                voice_choice = seg.get("voice")
+                if not voice_choice:
+                    if detect_gender:
+                        voice_choice = male_voice if seg.get("gender") == "male" else female_voice
+                    else:
+                        voice_choice = fallback_single_voice
+                changed_units.append({
+                    "id": sid,
+                    "seg": seg,
+                    "orig_vi": orig_vi,
+                    "new_vi": new_vi,
+                    "new_tts": new_tts,
+                    "voice": voice_choice,
+                    "out_path": tts_dir / f"{sid:04d}.wav",
+                })
+            else:
+                emit_event(stage_name, 26.0 + pass_idx * 12.0, f"Đoạn #{sid}: Lời thoại giữ nguyên sau lượt {pass_idx}.", level="info")
 
-            # Step A: Try API worker if running
-            if api_worker_available:
-                try:
-                    import requests
-                    res = requests.post(
-                        f"{api_base}/api/jobs/{job.job_id}/segments/{sid}/tts",
-                        json={"text": new_tts, "voice": voice_choice, "speed": 1.0},
-                        timeout=90,
-                    )
-                    if res.status_code == 200:
-                        rdata = res.json()
-                        d = float(rdata.get("tts_dur", 0.0))
-                        if d > 0.05 and w_file.exists():
-                            synth_ok = True
-                            new_dur = d
-                except Exception as e:
-                    emit_event(stage_name, 30.0 + pass_idx * 10, f"Worker TTS (port {get_api_port()}) câu #{sid} thử lại qua tiến trình con ({type(e).__name__}).", level="info")
+        if not changed_units:
+            emit_event(stage_name, 26.0 + pass_idx * 12.0, f"Lượt {pass_idx}: Không có câu nào cần thay đổi âm thanh.")
+            break
 
-            # Step B: Fallback to standalone single_tts subprocess
-            if not synth_ok:
-                try:
-                    tts_single_cmd = [
-                        str(get_runtime_python()), "-m", "dubstudio.tts.single_tts",
-                        "--text", new_tts,
-                        "--voice", voice_choice,
-                        "--speed", "1.0",
-                        "--out", str(w_file.resolve()),
-                    ]
-                    proc = subprocess.run(
-                        tts_single_cmd,
-                        env=get_subprocess_env(),
-                        capture_output=True,
-                        text=True,
-                        timeout=90,
-                        **get_subprocess_kwargs(),
-                    )
-                    if proc.returncode == 0 and w_file.exists():
-                        new_dur = round(sf.info(str(w_file)).duration, 3)
-                        if new_dur > 0.05:
-                            synth_ok = True
-                except Exception as e:
-                    emit_event(stage_name, 30.0 + pass_idx * 10, f"Tiến trình con TTS lỗi ở câu #{sid}: {e}", level="warning")
+        emit_event(stage_name, 28.0 + pass_idx * 12.0, f"Lượt {pass_idx}: Đang tổng hợp âm thanh TTS cho {len(changed_units)} câu đã biên tập lại...")
 
-            # Step C: Commit text & cues if audio synthesized, otherwise ROLL BACK to guarantee 100% sync!
-            if synth_ok and new_dur:
-                seg["vi_text"] = new_vi
-                seg["tts_text"] = new_tts
+        # Batch synthesize TTS for changed items only
+        synth_results = synthesize_fit_tts_batch(changed_units, tts_dir, cfg, job_id=job.job_id, stage_name=stage_name)
+
+        # Apply newly synthesized audio and sync cues
+        for item in changed_units:
+            sid = item["id"]
+            seg = item["seg"]
+            if sid in synth_results:
+                new_dur = synth_results[sid]
+                seg["vi_text"] = item["new_vi"]
+                seg["tts_text"] = item["new_tts"]
                 seg["tts_dur"] = new_dur
                 seg["tts_hash"] = None
-                seg["voice"] = voice_choice
-                new_cues = split_sentence_cues(new_vi, seg["start"], seg["end"], target_n=5)
+                seg["voice"] = item["voice"]
+                new_cues = split_sentence_cues(item["new_vi"], seg["start"], seg["end"], target_n=5)
                 seg["cues"] = new_cues
                 seg["sub_slices"] = [{"text": c["text"], "start": c["start"], "end": c["end"]} for c in new_cues]
+                emit_event(
+                    stage_name,
+                    29.0 + pass_idx * 12.0,
+                    f"Đoạn #{sid} đã cập nhật âm thanh ({item['orig_vi'][:25]}... -> {item['new_vi'][:25]}..., {new_dur:.2f}s)"
+                )
             else:
-                b = backup_segs[sid]
-                seg["vi_text"] = b["vi_text"]
-                seg["tts_text"] = b["tts_text"]
-                seg["tts_hash"] = b["tts_hash"]
-                seg["tts_dur"] = b["tts_dur"]
-                seg["voice"] = b["voice"]
-                seg["cues"] = b["cues"]
-                seg["sub_slices"] = b["sub_slices"]
-                emit_event(stage_name, 35.0, f"Giữ nguyên câu #{sid} do không tạo được âm thanh mới (bảo đảm phụ đề và giọng đọc khớp 100%)", level="warning")
+                emit_event(
+                    stage_name, 35.0,
+                    f"Giữ nguyên câu #{sid} do không tạo được âm thanh mới (bảo đảm phụ đề và giọng đọc khớp 100%)",
+                    level="warning"
+                )
 
         # Update actual wav durations for all segments
         for seg in segments:
@@ -517,7 +624,32 @@ def run(job: JobContext, cfg: AppConfig) -> None:
         with open(segments_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
-    # ─── 3. Final Placement & 1.0x - 1.1x Audio Stretching ───
+        # Check if any collisions remain after this pass
+        remaining_collisions = 0
+        for idx, seg in enumerate(segments):
+            st = float(seg["start"])
+            orig_dur = max(0.1, round(float(seg["end"]) - st, 3))
+            tts_dur = float(seg.get("tts_dur") or orig_dur)
+            next_st = float(segments[idx + 1]["start"]) if idx + 1 < len(segments) else (video_dur or st + orig_dur + 3.0)
+            avail = max(orig_dur, round(next_st - st, 3))
+            max_a = max(0.1, round(avail - 0.05, 3))
+            overlap_after_speed = round((tts_dur / 1.10) - max_a, 3)
+            if overlap_after_speed > ALLOWABLE_OVERLAP:
+                prev_end = float(segments[idx - 1]["end"]) if idx > 0 else 0.0
+                gap_before = max(0.0, st - prev_end)
+                shift_back = min(0.25, gap_before, overlap_after_speed - ALLOWABLE_OVERLAP)
+                shifted_avail = max(orig_dur, round(next_st - (st - shift_back), 3))
+                if round((tts_dur / 1.10) - (shifted_avail - 0.05), 3) > ALLOWABLE_OVERLAP:
+                    remaining_collisions += 1
+
+        if remaining_collisions == 0:
+            emit_event(
+                stage_name, 65.0,
+                f"Hoàn thành triệt tiêu đè âm thanh sau lượt {pass_idx}! Toàn bộ đều trong ngưỡng an toàn (<={ALLOWABLE_OVERLAP:.1f}s hoặc cân đối 1.0x-1.1x)."
+            )
+            break
+
+    # ─── 2. Final Placement & 1.0x - 1.1x Audio Stretching ───
     emit_event(stage_name, 70.0, "Đang căn chỉnh tốc độ và sắp xếp âm thanh lên trục timeline...")
     fit_plan = []
     outputs = ["fit_plan.json", "segments.json"]
@@ -536,12 +668,12 @@ def run(job: JobContext, cfg: AppConfig) -> None:
         else:
             next_st = video_dur if video_dur > st + orig_dur else (st + orig_dur + 3.0)
 
-        # Kiểm tra khoảng trống phía trước để xê dịch tối đa 0.5s nếu câu bị chèn
+        # Kiểm tra khoảng trống phía trước để xê dịch tối đa 0.25s nếu câu bị chèn
         prev_end = float(segments[idx - 1]["end"]) if idx > 0 else 0.0
         gap_before = max(0.0, st - prev_end)
         needed_dur = tts_dur / 1.10
         if needed_dur > (next_st - st) and gap_before > 0.02:
-            shift = min(0.50, gap_before, needed_dur - (next_st - st))
+            shift = min(0.25, gap_before, needed_dur - (next_st - st))
             st = max(0.0, round(st - shift, 3))
 
         available_dur = max(orig_dur, round(next_st - st, 3))
@@ -584,7 +716,7 @@ def run(job: JobContext, cfg: AppConfig) -> None:
         voice_start = round(st, 3)
         voice_end = round(voice_start + effective_dur, 3)
 
-        # Allow slight overlap on timeline within ALLOWABLE_OVERLAP (0.30s)
+        # Allow slight overlap on timeline within ALLOWABLE_OVERLAP (0.10s)
         if idx + 1 < len(segments) and voice_end > next_st + ALLOWABLE_OVERLAP:
             voice_end = round(next_st + ALLOWABLE_OVERLAP, 3)
             effective_dur = round(voice_end - voice_start, 3)

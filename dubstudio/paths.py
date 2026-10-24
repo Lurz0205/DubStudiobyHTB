@@ -38,16 +38,103 @@ def get_resource_dir() -> Path:
     return get_app_dir()
 
 
+def migrate_legacy_user_data(legacy_dir: Optional[Path] = None, target_dir: Optional[Path] = None) -> None:
+    """
+    Safely migrate legacy user data (%LocalAppData%\\DubStudio) to (%LocalAppData%\\DubStudioData).
+    Ensures user models (1.5GB+), logs, and configs are never wiped or conflicted with Velopack installation binaries.
+    """
+    if legacy_dir is None or target_dir is None:
+        if sys.platform == "win32":
+            base = os.environ.get("LOCALAPPDATA")
+            if base:
+                legacy_dir = Path(base) / "DubStudio"
+                target_dir = Path(base) / "DubStudioData"
+        if legacy_dir is None or target_dir is None:
+            legacy_dir = Path.home() / ".dubstudio"
+            target_dir = Path.home() / ".dubstudio_data"
+
+    try:
+        if not legacy_dir.exists() or legacy_dir.resolve() == target_dir.resolve():
+            return
+    except Exception:
+        return
+
+    items_to_migrate = [
+        "models",
+        "components",
+        "workspace",
+        "logs",
+        "out",
+        "runtime",
+        "data",
+        "cache",
+        "installed.json",
+        ".first_run_done",
+        "config.toml",
+    ]
+
+    _mkdir_retry(target_dir)
+
+    for item_name in items_to_migrate:
+        src = legacy_dir / item_name
+        dst = target_dir / item_name
+        if not src.exists():
+            continue
+        try:
+            if not dst.exists():
+                shutil.move(str(src), str(dst))
+            elif src.is_dir() and dst.is_dir():
+                for sub in list(src.rglob("*")):
+                    if sub.is_file():
+                        rel = sub.relative_to(src)
+                        target_file = dst / rel
+                        target_file.parent.mkdir(parents=True, exist_ok=True)
+                        if not target_file.exists():
+                            try:
+                                shutil.move(str(sub), str(target_file))
+                            except Exception:
+                                pass
+                        else:
+                            try:
+                                sub.unlink()
+                            except Exception:
+                                pass
+                try:
+                    shutil.rmtree(str(src), ignore_errors=True)
+                except Exception:
+                    pass
+            elif src.is_file():
+                try:
+                    src.unlink()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    # Clean legacy folder ONLY if it has NO Velopack metadata
+    velopack_markers = ["current", "packages", "Update.exe", "sq.version", "app.ico", "DubStudio.exe"]
+    has_velopack = any((legacy_dir / m).exists() for m in velopack_markers)
+    if not has_velopack:
+        try:
+            remaining = [p for p in legacy_dir.iterdir() if p.name not in (".", "..")]
+            if not remaining:
+                legacy_dir.rmdir()
+        except Exception:
+            pass
+
+
 def get_user_base_dir() -> Path:
-    """Return %LocalAppData%\\DubStudio isolated user root."""
+    """Return %LocalAppData%\\DubStudioData isolated user root."""
     if sys.platform == "win32":
         base = os.environ.get("LOCALAPPDATA")
         if base:
-            p = Path(base) / "DubStudio"
-            _mkdir_retry(p)
-            return p
-    fallback = Path.home() / ".dubstudio"
+            target = Path(base) / "DubStudioData"
+            _mkdir_retry(target)
+            migrate_legacy_user_data(Path(base) / "DubStudio", target)
+            return target
+    fallback = Path.home() / ".dubstudio_data"
     _mkdir_retry(fallback)
+    migrate_legacy_user_data(Path.home() / ".dubstudio", fallback)
     return fallback
 
 

@@ -1,20 +1,15 @@
 # PROGRESS.md — DubStudio Progress
 
 ## Đã hoàn thành (Done)
-- **Giai đoạn 1, 2 & 3:**
-  - Tách rời `start.bat` & `DubStudio.exe`. Windows Job Object kernel (`KILL_ON_JOB_CLOSE`), Dynamic Port & Readiness Gate, Atomic JSON Write.
-  - Stage Mutex trên 4GB VRAM, chống lỗi `WinError 32`, tự động tải mô hình qua HuggingFace Hub.
-- **Giai đoạn 4 (Patch v1.1.0 & v1.1.1):**
-  - Khắc phục `[WinError 10013]` socketpair, sửa lỗi mất tiếng preview video (`video_player.py`), chặn tiền kiểm tạo lồng tiếng khi chưa có phụ đề.
-  - Dọn dẹp cache cũ, chuyển cache dịch sang phạm vi dự án (`job.workspace/.cache`).
-- **Giai đoạn 5 (Patch v1.1.2 — Trình cập nhật chuẩn & Ổn định ASR):**
-  - **Trình cập nhật 3 tầng (Triple-Tier Fallback Updater):** Chạy ngầm `CheckUpdatesWorker` không đơ UI, so sánh phiên bản chuẩn SemVer `parse_semver`, Velopack delta patch + tự động stream tải `Setup.exe` nguyên tử kèm thanh tiến trình `0% - 100%` (MB/MB) và hộp thoại xác nhận khởi động lại ứng dụng.
-  - **Khắc phục SenseVoice & Kiểm tra mô hình:** Tắt triệt để thông báo nhắc tải Whisper khi người dùng đang chọn SenseVoice. Chuyển language="zh" tối ưu tiếng Trung có code-switching tiếng Anh.
-  - **Khôi phục Fit Rewriter:** Tự động kích hoạt CDP nền với Edge/Chrome khi sửa các đoạn TTS bị chèn nhau.
-  - **Ghim phiên bản cố định:** Hiển thị v{VERSION} (Dev / Packaged) ở góc dưới thanh trạng thái.
-  - Đạt 150/150 unit tests pass 100% (`pytest tests/ -q`).
+- **Cơ chế Nhắc nhở Mô hình Chính xác theo Người dùng Chọn:**
+  - Nhận diện đúng mô hình người dùng chọn trong Hướng dẫn (Tutorial) và Cài đặt (Settings), chỉ kiểm tra và cảnh báo đúng mô hình đó.
+  - Khi người dùng đổi sang mô hình khác (SenseVoice <-> Whisper, Kim Vocal 2 <-> BS-RoFormer) mà chưa tải, hệ thống lập tức thông báo nhắc tải gói tương ứng.
+- **Hot-Patch System & Safe Relaunch (Agent B Architecture):**
+  - **Mở khóa Breakaway Job Object (`dubstudio/win_job.py`):** Bật `JOB_OBJECT_LIMIT_BREAKAWAY_OK`, cho phép tiến trình cập nhật/khởi động lại sống sót độc lập sau khi app chính thoát.
+  - **Hot-Patch nạp động ngoài `_internal/` (`dubstudio/hotpatch.py`):** Lưu tại `%LocalAppData%\DubStudioData\hotpatch\<VERSION>`, ưu tiên nạp qua `HotpatchMetaPathFinder` vượt `PyiFrozenImporter`.
+  - **Xác thực SHA-256 & Kích thước (`dubstudio/updater.py`):** Kiểm tra mã băm và dung lượng trước khi giải nén/chạy Setup.exe, hủy bỏ ngay nếu rớt mạng hỏng file.
+  - **Graceful Shutdown & Wait-for-PID:** Dừng worker, media player, chờ PID cũ biến mất khỏi Windows kernel (tối đa 10s) rồi mới chạy `Setup.exe -s` và bật lại app.
+  - Đạt 100% unit tests (`tests/test_hotpatch_and_relaunch.py`, `tests/test_fit.py`, `tests/test_api.py`).
 
-## Quy trình Phát hành & Cập nhật vi sai (Release & Patch Workflow)
-- **Bản gốc Baseline:** `v1.1.0` đã được phát hành trên GitHub.
-- **Bản Patch v1.1.2:** Đẩy code lên `main` và gắn tag `v1.1.2`, kích hoạt GitHub Actions build `DubStudio-1.1.2-delta.nupkg` và `DubStudio-win-Setup.exe`.
-- **Người dùng bản cũ (v1.1.0 / v1.1.1):** Trình updater mới tải trực tiếp Setup.exe hoặc chạy installer cài đè mượt mà không mất dữ liệu, từ bản v1.1.2 trở đi ứng dụng sẽ tự động vá vi sai mượt mà.
+## Tiếp theo (Next)
+- Đợi lệnh của người dùng để build/đẩy bản vá lên GitHub khi sẵn sàng.

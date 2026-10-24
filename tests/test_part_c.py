@@ -29,9 +29,55 @@ def test_packaging_dev_vs_forced_mode(monkeypatch):
     monkeypatch.setenv("DUBSTUDIO_FORCE_PACKAGED", "1")
     assert is_packaged()
 
-    # User data directory should be outside repository
+    # User data directory should be outside repository and separated from Velopack app root
     user_dir = get_user_data_dir()
     assert "DubStudio" in str(user_dir)
+    assert str(user_dir).endswith("DubStudioData") or str(user_dir).endswith(".dubstudio_data")
+
+
+def test_migrate_legacy_user_data(tmp_path):
+    from dubstudio.paths import migrate_legacy_user_data
+    legacy = tmp_path / "DubStudio"
+    target = tmp_path / "DubStudioData"
+
+    legacy.mkdir()
+    (legacy / "models").mkdir()
+    (legacy / "models" / "weights.bin").write_text("model_bytes")
+    (legacy / "installed.json").write_text('{"installed": ["sensevoice"]}')
+    (legacy / ".first_run_done").write_text("1")
+
+    # Perform migration
+    migrate_legacy_user_data(legacy_dir=legacy, target_dir=target)
+
+    # Legacy should be cleaned up because it has no Velopack markers
+    assert not legacy.exists()
+    assert (target / "models" / "weights.bin").read_text() == "model_bytes"
+    assert (target / "installed.json").exists()
+    assert (target / ".first_run_done").exists()
+
+
+def test_migrate_legacy_user_data_preserves_velopack(tmp_path):
+    from dubstudio.paths import migrate_legacy_user_data
+    legacy = tmp_path / "DubStudio"
+    target = tmp_path / "DubStudioData"
+
+    legacy.mkdir()
+    (legacy / "models").mkdir()
+    (legacy / "models" / "weights.bin").write_text("model_bytes")
+    # Simulate Velopack app installation files
+    (legacy / "current").mkdir()
+    (legacy / "current" / "DubStudio.exe").write_text("binary")
+    (legacy / "Update.exe").write_text("binary")
+
+    migrate_legacy_user_data(legacy_dir=legacy, target_dir=target)
+
+    # Legacy directory MUST NOT be deleted because it is an active Velopack install
+    assert legacy.exists()
+    assert (legacy / "current" / "DubStudio.exe").exists()
+    assert (legacy / "Update.exe").exists()
+    # But user models MUST be moved to target
+    assert not (legacy / "models").exists()
+    assert (target / "models" / "weights.bin").exists()
 
 
 # ─── C3: GPU Detection (NVML / nvidia-smi without PyTorch) ───

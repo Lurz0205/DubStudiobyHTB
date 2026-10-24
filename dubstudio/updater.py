@@ -48,6 +48,26 @@ def check_github_releases(timeout: float = 6.0) -> Optional[Dict[str, Any]]:
     return None
 
 
+def verify_file_checksum(
+    file_path: Path,
+    expected_sha256: Optional[str] = None,
+    expected_size: Optional[int] = None,
+) -> bool:
+    """Verify that a downloaded package or installer matches expected byte size and SHA-256 hash."""
+    if not file_path.is_file():
+        return False
+    if expected_size and expected_size > 0:
+        actual_size = file_path.stat().st_size
+        if actual_size != expected_size:
+            return False
+    if expected_sha256:
+        import hashlib
+        actual_sha = hashlib.sha256(file_path.read_bytes()).hexdigest()
+        if actual_sha.lower() != expected_sha256.strip().lower():
+            return False
+    return True
+
+
 def check_all_updates(timeout: float = 6.0) -> Dict[str, Any]:
     """Check both GitHub app version updates and modular components updates."""
     result: Dict[str, Any] = {
@@ -59,6 +79,7 @@ def check_all_updates(timeout: float = 6.0) -> Dict[str, Any]:
         "download_url": f"https://github.com/{GITHUB_REPO}/releases",
         "setup_asset_url": "",
         "setup_asset_size": 0,
+        "setup_asset_sha256": "",
         "component_updates": [],
         "missing_components": [],
         "network_error": None,
@@ -102,25 +123,36 @@ def check_all_updates(timeout: float = 6.0) -> Dict[str, Any]:
         result["component_updates"] = comp_updates or []
 
         manifest = fetch_components_manifest()
-        # Determine currently selected ASR model from config / env
+        # Determine currently selected ASR and Separation models from config / env
         from dubstudio.config import AppConfig
         try:
             cfg = AppConfig.load()
             chosen_asr = os.getenv("WHISPER_MODEL", "") or os.getenv("ASR_MODEL", "") or cfg.asr.model_size or "sensevoice-small"
+            chosen_sep = os.getenv("SEPARATION_MODEL", "") or getattr(getattr(cfg, "separation", None), "model_name", "Kim_Vocal_2.onnx")
         except Exception:
-            chosen_asr = "sensevoice-small"
+            chosen_asr = os.getenv("WHISPER_MODEL", "sensevoice-small")
+            chosen_sep = os.getenv("SEPARATION_MODEL", "Kim_Vocal_2.onnx")
 
         active_asr_pkg = "sensevoice_small" if "sensevoice" in str(chosen_asr).lower() else "whisper_large_v3"
+        active_sep_pkg = "bs_roformer" if "roformer" in str(chosen_sep).lower() else "kim_vocal_2"
 
         for pkg in manifest.get("packages", []):
             pkg_id = pkg["id"]
-            # ASR packages: ONLY require the one actively chosen for work
-            if pkg.get("category") == "asr":
+            cat = pkg.get("category")
+            # 1. ASR packages: ONLY require the one actively chosen for work
+            if cat == "asr":
                 if pkg_id == active_asr_pkg:
                     ready, _ = is_component_ready(pkg_id)
                     if not ready:
                         result["missing_components"].append(pkg)
-            elif pkg.get("category") in ("separate", "tts", "runtime") or pkg.get("required"):
+            # 2. Separation packages: ONLY require the one actively chosen for work
+            elif cat == "separate":
+                if pkg_id == active_sep_pkg:
+                    ready, _ = is_component_ready(pkg_id)
+                    if not ready:
+                        result["missing_components"].append(pkg)
+            # 3. Global required packages (TTS, PyTorch, FFmpeg)
+            elif cat in ("tts", "runtime") or pkg.get("required"):
                 ready, _ = is_component_ready(pkg_id)
                 if not ready:
                     result["missing_components"].append(pkg)
@@ -128,6 +160,7 @@ def check_all_updates(timeout: float = 6.0) -> Dict[str, Any]:
         pass
 
     return result
+
 
 
 def repair_and_clean_cache() -> Dict[str, Any]:
