@@ -112,7 +112,7 @@ def apply_hotpatches() -> Optional[Path]:
         from dubstudio.updater import CURRENT_VERSION
         app_version = CURRENT_VERSION
     except Exception:
-        app_version = "1.1.2"
+        app_version = "1.1.3"
 
     root = get_hotpatch_base_dir()
 

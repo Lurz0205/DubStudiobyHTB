@@ -97,10 +97,77 @@ def stitch_dangling_clauses(segments: List[Dict[str, Any]]) -> List[Dict[str, An
     return segments
 
 
+def split_chinese_correspondingly(
+    zh_text: str,
+    durations: List[float],
+) -> List[str]:
+    """
+    Split Chinese text into len(durations) parts corresponding to split Vietnamese sentences.
+    Preserves Chinese sentence/clause boundaries and avoids repeating identical Chinese text.
+    """
+    if not zh_text or len(durations) <= 1:
+        return [zh_text] if zh_text else [""] * len(durations)
+
+    num_parts = len(durations)
+    total_dur = sum(durations) or 1.0
+
+    # First check if zh_text naturally splits into exactly num_parts by terminal punctuation
+    term_matches = list(re.finditer(r'([。？！…?!]+)(\s+|$)', zh_text))
+    if len(term_matches) in (num_parts - 1, num_parts):
+        parts = []
+        cur = 0
+        for m in term_matches[:num_parts - 1]:
+            parts.append(zh_text[cur:m.end()].strip())
+            cur = m.end()
+        parts.append(zh_text[cur:].strip())
+        if len(parts) == num_parts and all(parts):
+            return parts
+
+    # Otherwise, split proportionally based on durations, snapping cuts to nearest punctuation
+    all_punct = []
+    for m in re.finditer(r'([。？！…?!.,;，、；\s])', zh_text):
+        all_punct.append((m.end(), 2.0 if m.group() in "。？！…?!." else 1.0))
+
+    cuts = []
+    accum_dur = 0.0
+    zh_len = len(zh_text)
+    cur_idx = 0
+    for d in durations[:-1]:
+        accum_dur += d
+        target_char = int(round(zh_len * (accum_dur / total_dur)))
+        best_cut = None
+        best_score = float("inf")
+        margin = max(3, int(zh_len * 0.35))
+        for p_idx, weight in all_punct:
+            if cur_idx < p_idx < zh_len:
+                dist = abs(p_idx - target_char)
+                if dist <= margin:
+                    score = dist / weight
+                    if score < best_score:
+                        best_score = score
+                        best_cut = p_idx
+        if best_cut is None or best_cut <= cur_idx or best_cut >= zh_len:
+            best_cut = max(cur_idx + 1, min(zh_len - 1, target_char))
+        cuts.append(best_cut)
+        cur_idx = best_cut
+
+    result = []
+    prev_c = 0
+    for c in cuts:
+        result.append(zh_text[prev_c:c].strip())
+        prev_c = c
+    result.append(zh_text[prev_c:].strip())
+
+    if len(result) == num_parts:
+        return result
+    return [zh_text] + [""] * (num_parts - 1)
+
+
 def split_multi_sentence_segments(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Split segments that contain multiple complete sentences into separate individual
     segments for the voice track, so each sentence is read naturally as its own dubbing unit.
+    Also splits Chinese source text correspondingly so Chinese subtitles never duplicate.
     """
     result: List[Dict[str, Any]] = []
 
@@ -129,6 +196,16 @@ def split_multi_sentence_segments(segments: List[Dict[str, Any]]) -> List[Dict[s
             total_chars = sum(len(s.replace(" ", "")) for s in raw_sentences)
             if total_chars <= 0:
                 total_chars = max(1, len(vi_text))
+
+            # Compute proportional durations
+            part_durs = []
+            for sent_text in raw_sentences:
+                sent_chars = len(sent_text.replace(" ", ""))
+                part_durs.append(dur * (sent_chars / total_chars))
+
+            orig_zh = str(seg.get("src_text") or seg.get("zh") or "").strip()
+            zh_parts = split_chinese_correspondingly(orig_zh, part_durs)
+
             running_st = st
             for s_idx, sent_text in enumerate(raw_sentences):
                 sent_chars = len(sent_text.replace(" ", ""))
@@ -144,6 +221,9 @@ def split_multi_sentence_segments(segments: List[Dict[str, Any]]) -> List[Dict[s
                 new_seg["dur"] = round(sent_en - running_st, 3)
                 new_seg["vi_text"] = sent_text
                 new_seg["tts_text"] = sent_text
+                zh_val = zh_parts[s_idx] if s_idx < len(zh_parts) and zh_parts[s_idx] else orig_zh
+                new_seg["src_text"] = zh_val
+                new_seg["zh"] = zh_val
                 new_seg["tts_file"] = None
                 new_seg["tts_dur"] = None
                 new_seg["tts_hash"] = None

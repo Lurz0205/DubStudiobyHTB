@@ -218,6 +218,8 @@ def get_tts_worker() -> subprocess.Popen:
         if _tts_worker_proc is None or _tts_worker_proc.poll() is not None:
             py_exe = str(get_runtime_python().resolve())
             cmd = [py_exe, "-m", "dubstudio.tts.worker_server"]
+            sub_kwargs = get_subprocess_kwargs()
+            sub_kwargs.pop("stdin", None)
             _tts_worker_proc = subprocess.Popen(
                 cmd,
                 stdin=subprocess.PIPE,
@@ -227,7 +229,7 @@ def get_tts_worker() -> subprocess.Popen:
                 encoding="utf-8",
                 bufsize=1,
                 env=get_subprocess_env(),
-                **get_subprocess_kwargs(),
+                **sub_kwargs,
             )
             try:
                 from dubstudio.win_job import assign_process_to_job
@@ -286,10 +288,17 @@ def broadcast_event(event: Dict[str, Any]) -> None:
     global _active_job_id
     if not _active_job_id:
         return
-    queues = _job_event_queues.get(_active_job_id, [])
-    for q in queues:
+    listeners = list(_job_event_queues.get(_active_job_id, []))
+    for item in listeners:
         try:
-            q.put_nowait(event)
+            if isinstance(item, tuple):
+                loop, q = item
+                if loop.is_running():
+                    loop.call_soon_threadsafe(q.put_nowait, event)
+                else:
+                    q.put_nowait(event)
+            else:
+                item.put_nowait(event)
         except Exception:
             pass
 
@@ -581,10 +590,17 @@ def _run_pipeline_worker(job_id: str, video_path: Path, subtitles_only: bool = F
         with _job_lock:
             _active_job_id = None
         # Notify SSE listeners that pipeline has finished
-        queues = _job_event_queues.get(job_id, [])
-        for q in list(queues):
+        listeners = list(_job_event_queues.get(job_id, []))
+        for item in listeners:
             try:
-                q.put_nowait("[DONE]")
+                if isinstance(item, tuple):
+                    loop, q = item
+                    if loop.is_running():
+                        loop.call_soon_threadsafe(q.put_nowait, "[DONE]")
+                    else:
+                        q.put_nowait("[DONE]")
+                else:
+                    item.put_nowait("[DONE]")
             except Exception:
                 pass
 
@@ -864,10 +880,11 @@ async def run_job_stream(job_id: str, req: Optional[dict] = None):
         _active_job_id = job_id
 
     # Queue for streaming
+    loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
     if job_id not in _job_event_queues:
         _job_event_queues[job_id] = []
-    _job_event_queues[job_id].append(queue)
+    _job_event_queues[job_id].append((loop, queue))
 
     subtitles_only = bool(req.get("subtitles_only", False)) if req else False
     dub_only = bool(req.get("dub_only", False)) if req else False
@@ -879,7 +896,14 @@ async def run_job_stream(job_id: str, req: Optional[dict] = None):
     async def event_generator():
         try:
             while True:
-                data = await queue.get()
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=0.5)
+                except asyncio.TimeoutError:
+                    if not t.is_alive():
+                        yield "data: [DONE]\n\n"
+                        break
+                    continue
+
                 if isinstance(data, str) and data == "[DONE]":
                     yield "data: [DONE]\n\n"
                     break
@@ -890,8 +914,10 @@ async def run_job_stream(job_id: str, req: Optional[dict] = None):
         except asyncio.CancelledError:
             pass
         finally:
-            if job_id in _job_event_queues and queue in _job_event_queues[job_id]:
-                _job_event_queues[job_id].remove(queue)
+            if job_id in _job_event_queues:
+                for entry in list(_job_event_queues[job_id]):
+                    if (isinstance(entry, tuple) and entry[1] is queue) or entry is queue:
+                        _job_event_queues[job_id].remove(entry)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -928,21 +954,27 @@ def get_job_detail(job_id: str):
 @app.get("/api/jobs/{job_id}/events")
 async def job_events(job_id: str):
     """Server-Sent Events (SSE) streaming progress events for a job."""
+    loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
     if job_id not in _job_event_queues:
         _job_event_queues[job_id] = []
-    _job_event_queues[job_id].append(queue)
+    _job_event_queues[job_id].append((loop, queue))
 
     async def event_generator():
         try:
             while True:
                 data = await queue.get()
+                if isinstance(data, str) and data == "[DONE]":
+                    yield "data: [DONE]\n\n"
+                    break
                 yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
         except asyncio.CancelledError:
             pass
         finally:
-            if job_id in _job_event_queues and queue in _job_event_queues[job_id]:
-                _job_event_queues[job_id].remove(queue)
+            if job_id in _job_event_queues:
+                for entry in list(_job_event_queues[job_id]):
+                    if (isinstance(entry, tuple) and entry[1] is queue) or entry is queue:
+                        _job_event_queues[job_id].remove(entry)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -1278,6 +1310,7 @@ def merge_segments(job_id: str, req: MergeSegmentsRequest):
 @app.post("/api/jobs/{job_id}/segments/{seg_id}/split")
 def split_segment(job_id: str, req: SplitSegmentRequest, seg_id: Optional[int] = None):
     """Split a segment into two segments proportionally by word count."""
+    cfg = AppConfig.load()
     target_id = seg_id if seg_id is not None else req.seg_id
     from dubstudio.paths import resolve_job_workspace
     ws_dir = resolve_job_workspace(job_id)
@@ -1384,6 +1417,7 @@ def split_segment(job_id: str, req: SplitSegmentRequest, seg_id: Optional[int] =
 @app.post("/api/jobs/{job_id}/segments/{seg_id}/tts")
 def regenerate_segment_tts(job_id: str, seg_id: int, req: Optional[RegenTTSRequest] = None):
     """Regenerate TTS audio specifically for one segment with optional text, voice, and speed."""
+    cfg = AppConfig.load()
     import hashlib
     from dubstudio.text.vi_normalize import normalize_for_tts
 
@@ -1647,7 +1681,8 @@ def save_subtitle_style(job_id: str, req: SubtitleStyleRequest):
 @app.post("/api/jobs/{job_id}/render")
 def render_job_video(job_id: str):
     """Render final dubbed video with styled hard subtitles."""
-    from dubstudio.paths import resolve_job_workspace
+    cfg = AppConfig.load()
+    from dubstudio.paths import resolve_job_workspace, get_out_dir
     ws_dir = resolve_job_workspace(job_id)
     if not ws_dir.exists():
         raise HTTPException(status_code=404, detail="Không tìm thấy tác vụ")
@@ -1712,12 +1747,13 @@ def render_job_video(job_id: str):
     # Free all RAM & VRAM on render completion
     stop_tts_worker()
 
-    out_video = cfg.general.out_dir / f"{job_id}_vi.mp4"
+    out_dir = get_out_dir()
+    out_video = out_dir / f"{job_id}_vi.mp4"
     return {
         "status": "rendered",
         "video_path": str(out_video.resolve()) if out_video.exists() else "",
         "filename": f"{job_id}_vi.mp4",
-        "out_dir": str(cfg.general.out_dir.resolve()),
+        "out_dir": str(out_dir.resolve()),
     }
 
 
@@ -2345,7 +2381,7 @@ def edit_video_api(req: EditVideoRequest):
                     if gen_ass.exists():
                         ass_file = gen_ass
                 except Exception as e:
-                    logger.warning("Could not auto-generate subtitles for %s: %s", jid, e)
+                    _api_logger.warning("Could not auto-generate subtitles for %s: %s", jid, e)
 
         if ass_file:
             temp_sub_dir = Path("workspace/.cache/edit")

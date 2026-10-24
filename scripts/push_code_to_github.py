@@ -222,6 +222,16 @@ if requested_tag:
     tag_ref = f"refs/tags/{tag_name}"
     tag_payload = {"ref": tag_ref, "sha": new_commit_sha}
 
+    # Delete existing GitHub Release for this tag if present to ensure clean overwrite
+    rel_resp = session.get(f"{api_base}/releases/tags/{tag_name}")
+    if rel_resp.status_code == 200:
+        rel_id = rel_resp.json().get("id")
+        if rel_id:
+            del_rel = session.delete(f"{api_base}/releases/{rel_id}")
+            if del_rel.status_code in (204, 200):
+                print(f"Deleted existing GitHub Release object for {tag_name} (ID: {rel_id}) to overwrite cleanly.", flush=True)
+                time.sleep(1.0)
+
     del_resp = session.delete(f"{api_base}/git/refs/tags/{tag_name}")
     if del_resp.status_code in (204, 200):
         print(f"Deleted existing Git Tag {tag_name} ref on remote to prepare for fresh trigger.", flush=True)

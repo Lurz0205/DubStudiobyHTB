@@ -48,7 +48,7 @@ class ASGIInMemoryAdapter(requests.adapters.BaseAdapter):
         if self._client is None:
             from starlette.testclient import TestClient
             from dubstudio.api.app import app
-            self._client = TestClient(app)
+            self._client = TestClient(app, raise_server_exceptions=False)
         return self._client
 
     def send(self, request, stream=False, timeout=None, verify=True, cert=None, proxies=None):
@@ -62,6 +62,15 @@ class ASGIInMemoryAdapter(requests.adapters.BaseAdapter):
             path += "?" + parsed.query
 
         try:
+            if stream:
+                # For streaming requests (SSE progress events), send via standard HTTPAdapter
+                # over the local loopback port so chunks are yielded in true real time (no in-memory buffering).
+                try:
+                    http_adapter = requests.adapters.HTTPAdapter()
+                    return http_adapter.send(request, stream=True, timeout=timeout, verify=verify, cert=cert, proxies=proxies)
+                except Exception:
+                    pass
+
             client = self._get_client()
             if stream:
                 cm = client.stream(
@@ -162,13 +171,21 @@ def _request_with_retry(method: str, path: str, data: Optional[dict] = None, tim
             if r.status_code >= 400:
                 try:
                     err_data = r.json()
-                    msg = err_data.get("detail") or err_data.get("message")
+                    msg = err_data.get("message_vi") or err_data.get("detail") or err_data.get("message")
                     if msg:
-                        raise RuntimeError(msg)
+                        hint = err_data.get("hint_vi")
+                        full_msg = f"{msg}\n({hint})" if hint else msg
+                        raise RuntimeError(full_msg)
                 except Exception as ex:
                     if isinstance(ex, RuntimeError):
                         raise
-            r.raise_for_status()
+            try:
+                r.raise_for_status()
+            except requests.HTTPError as h_err:
+                clean_err = str(h_err)
+                if "for url:" in clean_err:
+                    clean_err = clean_err.split("for url:")[0].strip()
+                raise RuntimeError(clean_err) from h_err
             return r.json()
         except (requests.ConnectionError, requests.Timeout) as ex:
             last_err = ex

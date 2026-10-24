@@ -1,15 +1,16 @@
 # PROGRESS.md — DubStudio Progress
 
 ## Đã hoàn thành (Done)
-- **Cơ chế Nhắc nhở Mô hình Chính xác theo Người dùng Chọn:**
-  - Nhận diện đúng mô hình người dùng chọn trong Hướng dẫn (Tutorial) và Cài đặt (Settings), chỉ kiểm tra và cảnh báo đúng mô hình đó.
-  - Khi người dùng đổi sang mô hình khác (SenseVoice <-> Whisper, Kim Vocal 2 <-> BS-RoFormer) mà chưa tải, hệ thống lập tức thông báo nhắc tải gói tương ứng.
-- **Hot-Patch System & Safe Relaunch (Agent B Architecture):**
-  - **Mở khóa Breakaway Job Object (`dubstudio/win_job.py`):** Bật `JOB_OBJECT_LIMIT_BREAKAWAY_OK`, cho phép tiến trình cập nhật/khởi động lại sống sót độc lập sau khi app chính thoát.
-  - **Hot-Patch nạp động ngoài `_internal/` (`dubstudio/hotpatch.py`):** Lưu tại `%LocalAppData%\DubStudioData\hotpatch\<VERSION>`, ưu tiên nạp qua `HotpatchMetaPathFinder` vượt `PyiFrozenImporter`.
-  - **Xác thực SHA-256 & Kích thước (`dubstudio/updater.py`):** Kiểm tra mã băm và dung lượng trước khi giải nén/chạy Setup.exe, hủy bỏ ngay nếu rớt mạng hỏng file.
-  - **Graceful Shutdown & Wait-for-PID:** Dừng worker, media player, chờ PID cũ biến mất khỏi Windows kernel (tối đa 10s) rồi mới chạy `Setup.exe -s` và bật lại app.
-  - Đạt 100% unit tests (`tests/test_hotpatch_and_relaunch.py`, `tests/test_fit.py`, `tests/test_api.py`).
+- **Sửa dứt điểm lỗi xuất video (500 Server Error) & lỗi port 127.0.0.1:**
+  - Tìm ra nguyên nhân: Hàm `render_job_video` trong `dubstudio/api/app.py` thiếu khai báo `cfg = AppConfig.load()`, làm phát sinh ngoại lệ `NameError: name 'cfg' is not defined` khi lấy đường dẫn xuất video.
+  - Sửa toàn diện `app.py`: Đã bổ sung `cfg = AppConfig.load()` cho tất cả các endpoint liên quan (`render_job_video`, `split_segment`, `regenerate_segment_tts`) và thay thế `logger` bằng `_api_logger`.
+  - Khắc phục `ui/workers.py`:
+    + Cấu hình `TestClient(app, raise_server_exceptions=False)` trong In-Memory ASGI Bridge, trả về đầy đủ mã lỗi và dữ liệu phản hồi thay vì làm sập tiến trình gọi hoặc fallback sang TCP socket.
+    + Trích xuất thông điệp tiếng Việt thân thiện (`message_vi`) và loại bỏ hoàn toàn các chuỗi URL IP/Port khỏi thông báo lỗi người dùng.
+- **Xác thực toàn diện quy trình:**
+  - Test trực tiếp 5 luồng cốt lõi (Cài đặt, Danh sách tác vụ, Chi tiết tác vụ, Quản lý phụ đề, Xuất video) đều đạt 200 OK.
+  - Video mẫu `out/24102026_vi.mp4` được kết xuất hoàn chỉnh thành công.
+- 100% kiểm thử tự động đã vượt qua (`164/164 passed`). Đã đồng bộ mã nguồn sang `dist/`.
 
 ## Tiếp theo (Next)
-- Đợi lệnh của người dùng để build/đẩy bản vá lên GitHub khi sẵn sàng.
+- Đóng gói và phát hành bản vá mới khi người dùng yêu cầu.

@@ -58,9 +58,6 @@ def test_orig_audio_ranges_api():
         }
         res_save = client.post(f"/api/jobs/{job_id}/orig-ranges", json=payload)
         assert res_save.status_code == 200
-    finally:
-        if ws.exists():
-            shutil.rmtree(ws, ignore_errors=True)
         assert res_save.json()["status"] == "saved"
 
         # 3. Đọc lại và kiểm tra file trên đĩa

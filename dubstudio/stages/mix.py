@@ -330,32 +330,50 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
 
     # Build dynamic ffmpeg inputs and audio filters
     # Input 0 is always raw_voice_wav (its duration sets video length)
-    # Always format all streams to stereo so ffmpeg amix preserves 100% stereo fidelity!
+    # Studio Voice Mastering Chain:
+    # 1. highpass=f=80: cuts low-end sub-bass rumble
+    # 2. equalizer=f=3200:t=q:w=1.5:g=3.0: adds crisp speech clarity & presence for Vietnamese diacritics
+    # 3. equalizer=f=120:t=q:w=1.2:g=1.5: adds warm chest body
+    # 4. acompressor=threshold=-18dB:ratio=2.5:attack=5:release=50:makeup=2dB: professional broadcast dynamic leveling
+    # 5. volume={vi_voice_volume:.2f}: scales volume from 0% to 200% with true acoustic gain (+6dB at 200%)
+    # 6. alimiter=limit=0.98:attack=3:release=30: true-peak ceiling, zero digital clipping
     inputs = ["-i", str(raw_voice_wav.resolve())]
-    if vi_voice_volume > 1.001:
-        t = vi_voice_volume - 1.0
-        p1 = -40.0 + 15.0 * t
-        p2 = -20.0 + 14.0 * t
-        gain = 10.0 * t
-        vi_filter = f"aformat=channel_layouts=stereo,aresample=48000,compand=attacks=0.01:decays=0.1:points=-90/-90|-40/{p1:.1f}|-20/{p2:.1f}|0/0:gain={gain:.1f},alimiter=limit=0.98:attack=5:release=50"
-    else:
-        vi_filter = f"aformat=channel_layouts=stereo,aresample=48000,volume={vi_voice_volume:.2f}"
+    vi_filter = (
+        f"highpass=f=80,"
+        f"equalizer=f=3200:t=q:w=1.5:g=3.0,"
+        f"equalizer=f=120:t=q:w=1.2:g=1.5,"
+        f"acompressor=threshold=-18dB:ratio=2.5:attack=5:release=50:makeup=2dB,"
+        f"volume={vi_voice_volume:.2f},"
+        f"alimiter=limit=0.98:attack=3:release=30,"
+        f"aformat=channel_layouts=stereo,aresample=48000"
+    )
     filter_parts = [f"[0:a]{vi_filter}[vi]"]
     mix_inputs = ["[vi]"]
     input_idx = 1
 
     # Track 2: Video separated BGM (uses ducked BGM if passthrough ranges active)
+    # Applied with intelligent sidechain ducking against the Vietnamese voice track!
     if bgm_effective_wav and bgm_effective_wav.exists() and orig_bgm_volume > 0.001:
         inputs.extend(["-i", str(bgm_effective_wav.resolve())])
-        filter_parts.append(f"[{input_idx}:a]aformat=channel_layouts=stereo,aresample=48000,volume={orig_bgm_volume:.2f}[orig_bgm]")
-        mix_inputs.append("[orig_bgm]")
+        filter_parts.append(
+            f"[{input_idx}:a]aformat=channel_layouts=stereo,aresample=48000,volume={orig_bgm_volume:.2f}[raw_bgm]"
+        )
+        filter_parts.append(
+            "[raw_bgm][vi]sidechaincompress=threshold=0.03:ratio=4:attack=20:release=250[ducked_bgm]"
+        )
+        mix_inputs.append("[ducked_bgm]")
         input_idx += 1
 
-    # Track 3: Custom external BGM
+    # Track 3: Custom external BGM (also ducked by voice track!)
     if custom_bgm_path and custom_bgm_path.exists() and custom_bgm_volume > 0.001:
         inputs.extend(["-stream_loop", "-1", "-i", str(custom_bgm_path.resolve())])
-        filter_parts.append(f"[{input_idx}:a]aformat=channel_layouts=stereo,aresample=48000,volume={custom_bgm_volume:.2f}[custom_bgm]")
-        mix_inputs.append("[custom_bgm]")
+        filter_parts.append(
+            f"[{input_idx}:a]aformat=channel_layouts=stereo,aresample=48000,volume={custom_bgm_volume:.2f}[raw_custom_bgm]"
+        )
+        filter_parts.append(
+            "[raw_custom_bgm][vi]sidechaincompress=threshold=0.03:ratio=4:attack=20:release=250[ducked_custom_bgm]"
+        )
+        mix_inputs.append("[ducked_custom_bgm]")
         input_idx += 1
 
     # Track 4: Original voice/vocals
@@ -378,7 +396,7 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
 
     if len(mix_inputs) > 1:
         amix_chain = "".join(mix_inputs)
-        filter_complex = f"{';'.join(filter_parts)};{amix_chain}amix=inputs={len(mix_inputs)}:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.98:attack=5:release=50[out]"
+        filter_complex = f"{';'.join(filter_parts)};{amix_chain}amix=inputs={len(mix_inputs)}:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.98:attack=3:release=30[out]"
         cmd = [
             ffmpeg_exe, "-y",
             *inputs,
@@ -392,7 +410,7 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
         cmd = [
             ffmpeg_exe, "-y",
             *inputs,
-            "-filter:a", vi_filter if vi_voice_volume > 1.001 else f"aformat=channel_layouts=stereo,aresample=48000,volume={vi_voice_volume:.2f},alimiter=limit=0.98:attack=5:release=50",
+            "-filter:a", vi_filter,
             "-ac", "2",
             "-ar", str(out_sr),
             str(final_mixed_wav.resolve()),

@@ -872,16 +872,18 @@ class VideoPlayerWidget(QWidget):
             self._stop_all_audio_tracks()
             return
 
-        # Store volumes immediately
-        self.set_vi_voice_volume(vi_voice_vol)
-        self.set_orig_bgm_volume(orig_bgm_vol)
-        self.set_custom_bgm(custom_bgm_path, custom_bgm_vol)
-        self.set_orig_voice_volume(orig_voice_vol, include_orig_voice)
+        fast_vi = None
+        for cand in [ws / "voice_raw.wav", ws / "voice_track.wav"]:
+            if cand.exists() and cand.stat().st_size > 1000:
+                fast_vi = cand
+                break
 
-        # Fast path: Bind already existing cached files immediately in 0 ms
-        fast_vi = (ws / "voice_raw.wav") if (ws / "voice_raw.wav").exists() else ((ws / "voice_track.wav") if (ws / "voice_track.wav").exists() else None)
-        fast_bgm = (ws / "bgm_effective.wav") if (ws / "bgm_effective.wav").exists() else ((ws / "audio" / "bgm.wav") if (ws / "audio" / "bgm.wav").exists() else None)
-        fast_voc = (ws / "audio" / "vocals.wav") if (ws / "audio" / "vocals.wav").exists() else ((ws / "audio" / "orig.wav") if (ws / "audio" / "orig.wav").exists() else None)
+        bgm_p = ws / "audio" / "bgm.wav"
+        fast_bgm = bgm_p if (bgm_p.exists() and bgm_p.stat().st_size > 1000) else None
+
+        voc_p = ws / "audio" / "vocals.wav"
+        fast_voc = voc_p if (voc_p.exists() and voc_p.stat().st_size > 1000) else None
+
         has_custom = bool(custom_bgm_path and Path(custom_bgm_path).exists())
 
         has_any_stem = bool(fast_vi or fast_bgm or fast_voc or has_custom)
@@ -899,7 +901,12 @@ class VideoPlayerWidget(QWidget):
         self._audio_output.setVolume(0.0)
 
         if fast_vi:
-            self._vi_voice_path = str(fast_vi.resolve())
+            self._vi_voice_raw_path = str(fast_vi.resolve())
+            boosted = fast_vi.parent / "voice_boosted_200.wav"
+            if vi_voice_vol > 1.0 and boosted.exists():
+                self._vi_voice_path = str(boosted.resolve())
+            else:
+                self._vi_voice_path = str(fast_vi.resolve())
             self._vi_voice_player.setSource(QUrl.fromLocalFile(self._vi_voice_path))
         if fast_bgm:
             self._orig_bgm_path = str(fast_bgm.resolve())
@@ -907,7 +914,12 @@ class VideoPlayerWidget(QWidget):
         if fast_voc:
             self._orig_voice_path = str(fast_voc.resolve())
             self._orig_voice_player.setSource(QUrl.fromLocalFile(self._orig_voice_path))
-        self._apply_stem_volumes()
+
+        # Store volumes and apply across all stems
+        self.set_vi_voice_volume(vi_voice_vol)
+        self.set_orig_bgm_volume(orig_bgm_vol)
+        self.set_custom_bgm(custom_bgm_path, custom_bgm_vol)
+        self.set_orig_voice_volume(orig_voice_vol, include_orig_voice)
 
         # Launch background prep worker with generation ID to assemble/boost tracks asynchronously
         self._current_gen_id += 1
@@ -1008,7 +1020,7 @@ class VideoPlayerWidget(QWidget):
 
     @staticmethod
     def _ensure_boosted_track(raw_path: Optional[Path]) -> Optional[Path]:
-        """Pre-generate or cache 200% (+10.5 dB RMS broadcast companded) audio track safely."""
+        """Pre-generate studio-mastered 200% (+6 dB true acoustic power) voice track."""
         if not raw_path or not Path(raw_path).exists():
             return None
         raw_p = Path(raw_path).resolve()
@@ -1024,7 +1036,7 @@ class VideoPlayerWidget(QWidget):
             cmd = [
                 ffmpeg_exe, "-y",
                 "-i", str(raw_p),
-                "-filter:a", "compand=attacks=0.01:decays=0.1:points=-90/-90|-40/-25|-20/-6|0/0:gain=10,alimiter=limit=0.98:attack=5:release=50",
+                "-filter:a", "highpass=f=80,equalizer=f=3200:t=q:w=1.5:g=3.0,equalizer=f=120:t=q:w=1.2:g=1.5,acompressor=threshold=-18dB:ratio=2.5:attack=5:release=50:makeup=2dB,volume=2.0,alimiter=limit=0.98:attack=3:release=30",
                 str(tmp_boosted.resolve()),
             ]
             res = safe_subprocess_run(
@@ -1069,7 +1081,7 @@ class VideoPlayerWidget(QWidget):
         Apply stem volumes across all 4 independent audio tracks.
         For vi_voice:
         - <= 100%: uses raw audio with linear scaling [0.0, 1.0].
-        - > 100%: uses broadcast companded audio (+10.5 dB boost) with progressive volume curve.
+        - > 100%: uses studio-mastered boosted audio (+6 dB acoustic power) with progressive scaling.
         """
         vi_vol = getattr(self, "_vi_voice_vol", 1.0)
         bgm_vol = getattr(self, "_orig_bgm_vol", 0.8)
@@ -1078,7 +1090,7 @@ class VideoPlayerWidget(QWidget):
         orig_voice_vol = getattr(self, "_orig_voice_vol", 0.0) if include_orig else 0.0
 
         if vi_vol > 1.0:
-            eff_vi = max(0.0, min(1.0, 0.35 + 0.65 * (vi_vol - 1.0)))
+            eff_vi = max(0.0, min(1.0, 0.5 + 0.5 * (vi_vol - 1.0)))
         else:
             eff_vi = max(0.0, min(1.0, vi_vol))
 
@@ -1100,15 +1112,18 @@ class VideoPlayerWidget(QWidget):
 
     def set_vi_voice_volume(self, volume: float):
         """Live adjust Vietnamese voice dubbing volume (supports 0.0 to 2.0 / up to 200%)."""
+        old_vol = getattr(self, "_vi_voice_vol", 1.0)
         self._vi_voice_vol = max(0.0, min(2.0, float(volume)))
         raw_path = getattr(self, "_vi_voice_raw_path", None)
 
         if raw_path and Path(raw_path).exists():
-            if self._vi_voice_vol > 1.0:
+            crossed_up = (old_vol <= 1.0 and self._vi_voice_vol > 1.0)
+            crossed_down = (old_vol > 1.0 and self._vi_voice_vol <= 1.0)
+            if crossed_up:
                 boosted = self._ensure_boosted_track(Path(raw_path))
                 if boosted and boosted.exists():
                     self._switch_vi_voice_source(str(boosted.resolve()))
-            else:
+            elif crossed_down:
                 self._switch_vi_voice_source(str(Path(raw_path).resolve()))
 
         self._apply_stem_volumes()

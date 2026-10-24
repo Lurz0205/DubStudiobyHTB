@@ -166,7 +166,6 @@ def get_subprocess_kwargs() -> dict:
     if sys.platform == "win32":
         import subprocess
         kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        kwargs["stdin"] = subprocess.DEVNULL
         si = subprocess.STARTUPINFO()
         si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         si.wShowWindow = 0  # SW_HIDE
@@ -177,6 +176,7 @@ def get_subprocess_kwargs() -> dict:
 def safe_subprocess_popen(cmd: list[str], **kwargs) -> subprocess.Popen:
     """Launch a subprocess safely with Windows Job Object attachment and hidden window flags."""
     sub_kwargs = get_subprocess_kwargs()
+    sub_kwargs.setdefault("stdin", subprocess.DEVNULL)
     sub_kwargs.update(kwargs)
     proc = subprocess.Popen(cmd, **sub_kwargs)
     try:
@@ -190,6 +190,7 @@ def safe_subprocess_popen(cmd: list[str], **kwargs) -> subprocess.Popen:
 def safe_subprocess_run(cmd: list[str], check: bool = False, **kwargs) -> subprocess.CompletedProcess:
     """Run a subprocess to completion with Windows Job Object attachment and hidden window flags."""
     sub_kwargs = get_subprocess_kwargs()
+    sub_kwargs.setdefault("stdin", subprocess.DEVNULL)
     sub_kwargs.update(kwargs)
     proc = subprocess.Popen(cmd, **sub_kwargs)
     try:

@@ -212,6 +212,8 @@ def synthesize_fit_tts_batch(
 
     # Step 1: Attempt warm worker_server (loads model once, synthesizes in ~0.4s per line)
     try:
+        sub_kwargs = get_subprocess_kwargs()
+        sub_kwargs.pop("stdin", None)
         worker_proc = subprocess.Popen(
             worker_cmd,
             stdin=subprocess.PIPE,
@@ -220,8 +222,13 @@ def synthesize_fit_tts_batch(
             text=True,
             bufsize=1,
             env=get_subprocess_env(),
-            **get_subprocess_kwargs(),
+            **sub_kwargs,
         )
+        try:
+            from dubstudio.win_job import assign_process_to_job
+            assign_process_to_job(worker_proc)
+        except Exception:
+            pass
 
         init_line = worker_proc.stdout.readline() if worker_proc.stdout else ""
         if init_line:
