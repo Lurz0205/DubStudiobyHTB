@@ -49,14 +49,14 @@ if tree_fetch_resp.status_code == 200:
         if item.get("type") == "blob":
             remote_files_map[item["path"]] = item["sha"]
 
-# 3. Collect files and filter to ONLY changed files
+# 3. Collect ALL local project files and calculate Git SHA-1 for every file
 excluded_dirs = {'.venv', 'models', 'workspace', 'out', 'samples', '__pycache__', 'dist', 'build', 'bin', '.pytest_cache', '.git'}
 excluded_files = {'.env', 'scratch_analyze.py', 'release_manifest.json'}
 
 def calc_git_sha(content_bytes: bytes) -> str:
     return hashlib.sha1(b"blob " + str(len(content_bytes)).encode("ascii") + b"\x00" + content_bytes).hexdigest()
 
-files_to_push = []
+local_files_map = {}
 for root, dirs, files in os.walk('.'):
     dirs[:] = [d for d in dirs if d not in excluded_dirs]
     for f in files:
@@ -65,94 +65,148 @@ for root, dirs, files in os.walk('.'):
         p = Path(root) / f
         rel = p.relative_to('.').as_posix()
         content = p.read_bytes()
-        local_sha = calc_git_sha(content)
-        if remote_files_map.get(rel) != local_sha:
-            files_to_push.append((rel, p, content, local_sha))
+        local_files_map[rel] = (p, content, calc_git_sha(content))
 
-print(f"Total changed files to upload: {len(files_to_push)}", flush=True)
-for rel, _, _, _ in files_to_push:
-    print(f"  * {rel}", flush=True)
+# 4. Compare Local vs Remote Tree (Deterministic 1:1 Snapshot Audit)
+identical_files = []
+modified_files = []
+added_files = []
+deleted_files = []
 
-if not files_to_push:
-    print("Khong co file nao thay doi so voi commit tren GitHub!", flush=True)
+for rel, (p, content, local_sha) in local_files_map.items():
+    if rel in remote_files_map:
+        if remote_files_map[rel] == local_sha:
+            identical_files.append((rel, local_sha))
+        else:
+            modified_files.append((rel, p, content, remote_files_map[rel], local_sha))
+    else:
+        added_files.append((rel, p, content, local_sha))
 
-# 4. Create blobs for changed files only
-tree_items = []
-for idx, (rel_path, local_path, content_bytes, _) in enumerate(files_to_push, 1):
-    b64_content = base64.b64encode(content_bytes).decode("utf-8")
-    
-    blob_sha = None
-    for attempt in range(3):
-        blob_resp = session.post(
-            f"{api_base}/git/blobs",
-            json={"content": b64_content, "encoding": "base64"},
-        )
-        if blob_resp.status_code == 201:
-            blob_sha = blob_resp.json()["sha"]
-            break
-        time.sleep(1.0)
-        
-    if not blob_sha:
-        print(f"Failed to create blob for {rel_path}: {blob_resp.status_code} {blob_resp.text}", flush=True)
-        exit(1)
-        
-    tree_items.append({
-        "path": rel_path,
+for rel, remote_sha in remote_files_map.items():
+    if rel not in local_files_map:
+        deleted_files.append((rel, remote_sha))
+
+print("=" * 65, flush=True)
+print("       BANG DOI CHIEU MÃ NGUON LOCAL VA GITHUB TREE SNAPSHOT", flush=True)
+print("=" * 65, flush=True)
+print(f"Tong so file ma nguon tren may: {len(local_files_map)}", flush=True)
+print(f"Tong so file tren GitHub tree:  {len(remote_files_map)}", flush=True)
+print(f"  * Giu nguyen (khop 100% SHA): {len(identical_files)}", flush=True)
+print(f"  * Thay doi noi dung:         {len(modified_files)}", flush=True)
+print(f"  * File moi them:              {len(added_files)}", flush=True)
+print(f"  * File da xoa:                {len(deleted_files)}", flush=True)
+print("-" * 65, flush=True)
+
+if modified_files:
+    print("Cac file thay doi (Modified):", flush=True)
+    for rel, _, _, old_sha, new_sha in modified_files:
+        print(f"  [M] {rel} ({old_sha[:7]} -> {new_sha[:7]})", flush=True)
+
+if added_files:
+    print("Cac file moi them (Added):", flush=True)
+    for rel, _, _, sha in added_files:
+        print(f"  [+] {rel} ({sha[:7]})", flush=True)
+
+if deleted_files:
+    print("Cac file da xoa tren local (Deleted from tree):", flush=True)
+    for rel, sha in deleted_files:
+        print(f"  [-] {rel} ({sha[:7]})", flush=True)
+
+print("=" * 65, flush=True)
+
+# 5. Upload blobs for new / modified files
+files_to_upload = [(rel, p, c, sha) for (rel, p, c, _, sha) in modified_files] + [(rel, p, c, sha) for (rel, p, c, sha) in added_files]
+
+full_tree_items = []
+# Re-use existing blob SHAs for identical files (zero network transfer!)
+for rel, sha in identical_files:
+    full_tree_items.append({
+        "path": rel,
         "mode": "100644",
         "type": "blob",
-        "sha": blob_sha,
+        "sha": sha,
     })
-    print(f"  -> Uploaded blob: {rel_path} ({idx}/{len(files_to_push)})", flush=True)
 
-# 5. Create new tree (overlaying changes on top of base_tree)
-if tree_items:
-    tree_resp = session.post(
-        f"{api_base}/git/trees",
-        json={"base_tree": base_tree_sha, "tree": tree_items},
-    )
-    if tree_resp.status_code != 201:
-        print("Failed to create tree:", tree_resp.status_code, tree_resp.text, flush=True)
-        exit(1)
-    new_tree_sha = tree_resp.json()["sha"]
-    print(f"Created new tree: {new_tree_sha[:7]}", flush=True)
+if files_to_upload:
+    print(f"\nDang tai len {len(files_to_upload)} blob moi len GitHub...", flush=True)
+    for idx, (rel_path, local_path, content_bytes, expected_sha) in enumerate(files_to_upload, 1):
+        b64_content = base64.b64encode(content_bytes).decode("utf-8")
+        blob_sha = None
+        for attempt in range(3):
+            blob_resp = session.post(
+                f"{api_base}/git/blobs",
+                json={"content": b64_content, "encoding": "base64"},
+            )
+            if blob_resp.status_code == 201:
+                blob_sha = blob_resp.json()["sha"]
+                break
+            time.sleep(1.0)
+            
+        if not blob_sha:
+            print(f"Failed to create blob for {rel_path}: {blob_resp.status_code} {blob_resp.text}", flush=True)
+            exit(1)
+            
+        full_tree_items.append({
+            "path": rel_path,
+            "mode": "100644",
+            "type": "blob",
+            "sha": blob_sha,
+        })
+        print(f"  -> Uploaded blob: {rel_path} ({idx}/{len(files_to_upload)}) [SHA: {blob_sha[:7]}]", flush=True)
+
+# 6. Create Full Tree Snapshot (Contains 100% of all local files, NO base_tree overlay!)
+assert len(full_tree_items) == len(local_files_map), f"Tree size mismatch: {len(full_tree_items)} vs {len(local_files_map)}"
+
+tree_resp = session.post(
+    f"{api_base}/git/trees",
+    json={"tree": full_tree_items},
+)
+if tree_resp.status_code != 201:
+    print("Failed to create tree:", tree_resp.status_code, tree_resp.text, flush=True)
+    exit(1)
+new_tree_sha = tree_resp.json()["sha"]
+print(f"\n[XAC NHAN] Da tao Full Tree Snapshot hoan hao tren GitHub: {new_tree_sha[:7]} (Chua dung {len(full_tree_items)} file).", flush=True)
+
+
+# 7. Create commit if tree changed, or reuse current commit if identical
+if new_tree_sha == base_tree_sha:
+    print(f"\n[HOAN TOAN DONG BO] 100% Cay thu muc GitHub va Local hoan toan trung khop (Tree: {new_tree_sha[:7]}). Khong can tao commit moi.", flush=True)
+    new_commit_sha = parent_commit_sha
 else:
-    new_tree_sha = base_tree_sha
+    import sys
+    commit_msg = "Update source tree snapshot"
+    for i, arg in enumerate(sys.argv):
+        if arg == "--msg" and i + 1 < len(sys.argv):
+            commit_msg = sys.argv[i + 1]
+        elif arg.startswith("--msg="):
+            commit_msg = arg.split("=", 1)[1]
 
-# 6. Create commit
-import sys
-commit_msg = "Release: Patch v1.1.1 - Fix ASR BPE loading, project-scoped cache & dub gate"
-for i, arg in enumerate(sys.argv):
-    if arg == "--msg" and i + 1 < len(sys.argv):
-        commit_msg = sys.argv[i + 1]
-    elif arg.startswith("--msg="):
-        commit_msg = arg.split("=", 1)[1]
+    commit_payload = {
+        "message": commit_msg,
+        "tree": new_tree_sha,
+        "parents": [parent_commit_sha],
+    }
+    new_commit_resp = session.post(
+        f"{api_base}/git/commits",
+        json=commit_payload,
+    )
+    if new_commit_resp.status_code != 201:
+        print("Failed to create commit:", new_commit_resp.status_code, new_commit_resp.text, flush=True)
+        exit(1)
 
-commit_payload = {
-    "message": commit_msg,
-    "tree": new_tree_sha,
-    "parents": [parent_commit_sha],
-}
-new_commit_resp = session.post(
-    f"{api_base}/git/commits",
-    json=commit_payload,
-)
-if new_commit_resp.status_code != 201:
-    print("Failed to create commit:", new_commit_resp.status_code, new_commit_resp.text, flush=True)
-    exit(1)
+    new_commit_sha = new_commit_resp.json()["sha"]
+    print(f"Created commit: {new_commit_sha[:7]}", flush=True)
 
-new_commit_sha = new_commit_resp.json()["sha"]
-print(f"Created commit: {new_commit_sha[:7]}", flush=True)
+    # 8. Update ref
+    ref_update = session.patch(
+        f"{api_base}/git/refs/heads/main",
+        json={"sha": new_commit_sha},
+    )
+    if ref_update.status_code != 200:
+        print("Failed to update ref:", ref_update.status_code, ref_update.text, flush=True)
+        exit(1)
 
-# 7. Update ref
-ref_update = session.patch(
-    f"{api_base}/git/refs/heads/main",
-    json={"sha": new_commit_sha},
-)
-if ref_update.status_code != 200:
-    print("Failed to update ref:", ref_update.status_code, ref_update.text, flush=True)
-    exit(1)
-
-print(f"\n[THANH CONG] Toan bo ma nguon da duoc dong bo len branch main (Commit: {new_commit_sha[:7]})!", flush=True)
+    print(f"\n[THANH CONG] Toan bo ma nguon da duoc dong bo len branch main (Commit: {new_commit_sha[:7]})!", flush=True)
 
 # 8. Create tag ONLY if explicitly requested via command line (e.g. --tag v1.1.1)
 import sys
