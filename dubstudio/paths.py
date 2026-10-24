@@ -402,11 +402,66 @@ def get_out_dir() -> Path:
         return d.resolve()
 
     if is_packaged():
-        d = get_user_base_dir() / "out"
+        # Standard user-accessible directory on Windows: ~/Videos/DubStudio
+        try:
+            user_videos = Path.home() / "Videos"
+            if user_videos.exists() or sys.platform == "win32":
+                d = user_videos / "DubStudio"
+            else:
+                d = get_user_base_dir() / "out"
+        except Exception:
+            d = get_user_base_dir() / "out"
     else:
         d = get_app_dir() / "out"
     _mkdir_retry(d)
     return d.resolve()
+
+
+def get_env_file() -> Path:
+    """Return .env path: %LocalAppData%\\DubStudioData\\.env in packaged mode, or repo .env in dev."""
+    if is_packaged():
+        target = get_user_base_dir() / ".env"
+        if not target.exists() and (get_app_dir() / ".env").exists():
+            try:
+                shutil.copy2(get_app_dir() / ".env", target)
+            except Exception:
+                pass
+        return target
+    return get_app_dir() / ".env"
+
+
+def open_in_file_manager(target: str | Path) -> None:
+    """
+    Open system file explorer at the target file or directory.
+    On Windows:
+    - If target is an existing file, opens Explorer and selects/highlights the file.
+    - If target is a directory, opens that directory.
+    """
+    try:
+        p = Path(target).resolve()
+        if not p.exists() and p.parent.exists():
+            p = p.parent
+
+        if sys.platform == "win32":
+            import subprocess
+            if p.is_file():
+                subprocess.Popen(f'explorer /select,"{p}"', shell=True)
+            else:
+                os.startfile(str(p))
+        elif sys.platform == "darwin":
+            import subprocess
+            cmd = ["open", "-R", str(p)] if p.is_file() else ["open", str(p)]
+            subprocess.Popen(cmd)
+        else:
+            import subprocess
+            folder = str(p.parent if p.is_file() else p)
+            subprocess.Popen(["xdg-open", folder])
+    except Exception:
+        try:
+            if sys.platform == "win32":
+                os.startfile(str(Path(target).resolve().parent))
+        except Exception:
+            pass
 
 
 def get_bin_dir() -> Path:

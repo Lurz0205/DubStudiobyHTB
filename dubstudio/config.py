@@ -152,7 +152,8 @@ class AppConfig(BaseSettings):
         # Apply environment and .env overrides for user preferences
         import os
         from dotenv import load_dotenv
-        load_dotenv(override=False)
+        from dubstudio.paths import get_env_file
+        load_dotenv(dotenv_path=get_env_file(), override=False)
 
         asr_model = os.getenv("WHISPER_MODEL") or os.getenv("ASR_MODEL")
         if asr_model:

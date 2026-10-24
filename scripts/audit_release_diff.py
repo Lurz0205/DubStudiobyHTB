@@ -48,18 +48,33 @@ def get_github_session() -> Tuple[requests.Session, str, str, str]:
     return session, api_base, owner, repo
 
 
+import re
+
+
+def _parse_version(v: str) -> Tuple[int, ...]:
+    """Parse version string into integer tuple for strict semantic comparison."""
+    clean = v.split("-")[0].lstrip("v")
+    nums = re.findall(r"\d+", clean)
+    return tuple(int(x) for x in nums) if nums else (0,)
+
+
 def find_last_release_tag(session: requests.Session, api_base: str, current_version: str) -> Tuple[str, str]:
-    """Find the latest release tag before current_version."""
-    curr_clean = current_version.lstrip("v")
+    """Find the latest release tag strictly less than current_version.
     
+    Guarantees that intermediate debug tags of the same release version
+    are never used as the audit base.
+    """
+    curr_tuple = _parse_version(current_version)
+    candidates: List[Tuple[Tuple[int, ...], str, str]] = []
+
     # 1. Check GitHub Releases
     resp = session.get(f"{api_base}/releases")
     if resp.status_code == 200:
         releases = resp.json()
         for r in releases:
             tag = r.get("tag_name", "")
-            tag_clean = tag.lstrip("v")
-            if tag_clean != curr_clean:
+            tag_tuple = _parse_version(tag)
+            if tag_tuple < curr_tuple:
                 commit_sha = ""
                 # Get commit SHA for this tag
                 tag_ref_resp = session.get(f"{api_base}/git/ref/tags/{tag}")
@@ -71,7 +86,11 @@ def find_last_release_tag(session: requests.Session, api_base: str, current_vers
                         annotated_resp = session.get(tag_obj.get("url", ""))
                         if annotated_resp.status_code == 200:
                             commit_sha = annotated_resp.json().get("object", {}).get("sha", commit_sha)
-                return tag, commit_sha
+                candidates.append((tag_tuple, tag, commit_sha))
+
+    if candidates:
+        candidates.sort(key=lambda c: c[0], reverse=True)
+        return candidates[0][1], candidates[0][2]
 
     # 2. Check Git Tags fallback
     tags_resp = session.get(f"{api_base}/tags")
@@ -79,8 +98,13 @@ def find_last_release_tag(session: requests.Session, api_base: str, current_vers
         tags = tags_resp.json()
         for t in tags:
             tag_name = t.get("name", "")
-            if tag_name.lstrip("v") != curr_clean:
-                return tag_name, t.get("commit", {}).get("sha", "")
+            tag_tuple = _parse_version(tag_name)
+            if tag_tuple < curr_tuple:
+                candidates.append((tag_tuple, tag_name, t.get("commit", {}).get("sha", "")))
+
+    if candidates:
+        candidates.sort(key=lambda c: c[0], reverse=True)
+        return candidates[0][1], candidates[0][2]
 
     # Default fallback
     return "v1.1.2", ""

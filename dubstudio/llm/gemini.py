@@ -182,7 +182,8 @@ class GeminiTranslator:
         self.cdp_port = getattr(cfg.translation, "cdp_port", 9222)
 
         self.chunk_lines = 10
-        self.cache_dir = cache_dir or Path("workspace/.cache/llm")
+        from dubstudio.paths import get_workspace_dir
+        self.cache_dir = cache_dir or (get_workspace_dir() / ".cache" / "llm")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         if self.provider == "gemini_web":
             self.min_interval = 1.5

@@ -1058,7 +1058,8 @@ class StudioPage(QWidget):
             return
 
         target_n = self._spin_words_per_line.value()
-        ws_dir = Path("workspace") / self._current_job_id
+        from dubstudio.paths import resolve_job_workspace
+        ws_dir = resolve_job_workspace(self._current_job_id)
         analysis_data = {}
         analysis_file = ws_dir / "analysis.json"
         if analysis_file.exists():
@@ -1120,7 +1121,8 @@ class StudioPage(QWidget):
     def _run_subtitles_pipeline(self):
         """Run stages 1 to 8: ingest up to translation to generate subtitles for review."""
         if self._current_job_id and hasattr(self, "_spin_words_per_line"):
-            ws_dir = Path("workspace") / self._current_job_id
+            from dubstudio.paths import resolve_job_workspace
+            ws_dir = resolve_job_workspace(self._current_job_id)
             conf_file = ws_dir / "job_config.json"
             conf_data = {}
             if conf_file.exists():
@@ -1210,22 +1212,14 @@ class StudioPage(QWidget):
 
         self._video_player.unload()
 
-        if subtitles_only:
-            try:
-                from ui.workers import StopTTSWorker
-                stop_w = StopTTSWorker()
-                self._workers.append(stop_w)
-                stop_w.start()
-            except Exception:
-                pass
-        else:
-            try:
-                from ui.workers import WarmTTSWorker
-                warm_w = WarmTTSWorker()
-                self._workers.append(warm_w)
-                warm_w.start()
-            except Exception:
-                pass
+        # Always terminate background warm worker before pipeline execution to prevent VRAM collision
+        try:
+            from ui.workers import StopTTSWorker
+            stop_w = StopTTSWorker()
+            self._workers.append(stop_w)
+            stop_w.start()
+        except Exception:
+            pass
 
         self._btn_run.setEnabled(False)
         if hasattr(self, "_btn_create_dub"):
@@ -1234,6 +1228,7 @@ class StudioPage(QWidget):
         self._progress_bar.setValue(0)
         self._lbl_status.setVisible(True)
         self._lbl_status.setText("Đang khởi động tiến trình...")
+        QApplication.processEvents()
 
         detect_gender = self._chk_detect_gender.isChecked()
         single_voice_gender = self._combo_single_gender.currentData() or "male"
@@ -1297,7 +1292,7 @@ class StudioPage(QWidget):
                     "👉 Bạn hãy chuyển sang tab 'Cài đặt' để chọn phương thức dịch phù hợp (Gemini Web hoặc Tự dịch thủ công), sau đó bấm '1. Tạo phụ đề' lại."
                 )
             else:
-                from dubstudio.paths import get_logs_dir
+                from dubstudio.paths import get_logs_dir, open_in_file_manager
                 logs_dir = get_logs_dir()
                 msg_box = QMessageBox(self)
                 msg_box.setIcon(QMessageBox.Icon.Critical)
@@ -1308,8 +1303,7 @@ class StudioPage(QWidget):
                 msg_box.exec()
                 if msg_box.clickedButton() == btn_open_logs:
                     try:
-                        import os
-                        os.startfile(str(logs_dir.resolve()))
+                        open_in_file_manager(logs_dir)
                     except Exception:
                         pass
 
@@ -1466,17 +1460,15 @@ class StudioPage(QWidget):
                     break
             self._timeline.set_segments(self._current_segments)
 
-            # Update video player preview voice track immediately
+            # Update video player preview voice track immediately without blocking UI
             if hasattr(self, "_video_player") and self._video_player:
-                ws_dir = Path("workspace") / self._current_job_id
+                from dubstudio.paths import resolve_job_workspace
+                ws_dir = resolve_job_workspace(self._current_job_id)
                 raw_wav = ws_dir / "voice_raw.wav"
-                try:
-                    raw_wav.unlink(missing_ok=True)
-                except Exception:
-                    pass
-                v_track = self._video_player._ensure_voice_raw(ws_dir)
-                if v_track and v_track.exists():
-                    self._video_player.load_audio_tracks(vi_voice_path=v_track)
+                if not raw_wav.exists() or raw_wav.stat().st_size <= 44:
+                    raw_wav = ws_dir / "voice_track.wav"
+                if raw_wav.exists() and raw_wav.stat().st_size > 44:
+                    self._video_player.load_audio_tracks(vi_voice_path=raw_wav)
 
         def _on_err(idx, err):
             self._sub_editor.set_row_busy(idx, False)
@@ -1543,15 +1535,13 @@ class StudioPage(QWidget):
         )
         def _on_done(idx, res):
             if hasattr(self, "_video_player") and self._video_player:
-                ws_dir = Path("workspace") / self._current_job_id
+                from dubstudio.paths import resolve_job_workspace
+                ws_dir = resolve_job_workspace(self._current_job_id)
                 raw_wav = ws_dir / "voice_raw.wav"
-                try:
-                    raw_wav.unlink(missing_ok=True)
-                except Exception:
-                    pass
-                v_track = self._video_player._ensure_voice_raw(ws_dir)
-                if v_track and v_track.exists():
-                    self._video_player.load_audio_tracks(vi_voice_path=v_track)
+                if not raw_wav.exists() or raw_wav.stat().st_size <= 44:
+                    raw_wav = ws_dir / "voice_track.wav"
+                if raw_wav.exists() and raw_wav.stat().st_size > 44:
+                    self._video_player.load_audio_tracks(vi_voice_path=raw_wav)
         w.finished.connect(_on_done)
         self._workers.append(w)
         w.start()
@@ -1562,7 +1552,8 @@ class StudioPage(QWidget):
         from dubstudio.config import AppConfig
         cfg = AppConfig.load()
         selected_gender = self._combo_single_gender.currentData() or "male"
-        conf_file = Path("workspace") / self._current_job_id / "job_config.json"
+        from dubstudio.paths import resolve_job_workspace
+        conf_file = resolve_job_workspace(self._current_job_id) / "job_config.json"
         c_data = {}
         if conf_file.exists():
             try:
@@ -1594,7 +1585,8 @@ class StudioPage(QWidget):
     def _on_gender_mode_toggled(self, is_multi: bool):
         if not self._current_job_id:
             return
-        conf_file = Path("workspace") / self._current_job_id / "job_config.json"
+        from dubstudio.paths import resolve_job_workspace
+        conf_file = resolve_job_workspace(self._current_job_id) / "job_config.json"
         c_data = {}
         if conf_file.exists():
             try:
@@ -1888,7 +1880,8 @@ class StudioPage(QWidget):
 
         def _on_audio_rebuilt(res):
             if hasattr(self, "_video_player") and self._video_player and self._current_job_id:
-                ws_dir = Path("workspace") / self._current_job_id
+                from dubstudio.paths import resolve_job_workspace
+                ws_dir = resolve_job_workspace(self._current_job_id)
                 self._video_player.setup_job_audio(workspace_dir=ws_dir, is_rendered_video=False)
 
         w = BatchUpdateSegmentsWorker(self._current_job_id, updates, rebuild_audio=True)

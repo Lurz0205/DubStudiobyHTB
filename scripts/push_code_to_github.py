@@ -29,7 +29,42 @@ headers = {
 session = requests.Session()
 session.headers.update(headers)
 
-# 0. Mandatory Pre-Push Audit: Compare against last official release
+# Parse requested tag from CLI arguments
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from dubstudio.version import APP_VERSION
+
+requested_tag = None
+for i, arg in enumerate(sys.argv):
+    if arg == "--tag" and i + 1 < len(sys.argv):
+        requested_tag = sys.argv[i + 1]
+    elif arg.startswith("--tag="):
+        requested_tag = arg.split("=", 1)[1]
+
+target_clean_tag = (requested_tag if requested_tag.startswith("v") else f"v{requested_tag}") if requested_tag else f"v{APP_VERSION}"
+
+# 0a. Pre-Release Cleanup on Remote:
+# Delete existing Release and Tag for target_clean_tag on GitHub before auditing/pushing.
+# This guarantees that the latest release on GitHub is strictly < CURRENT_VERSION (e.g. v1.1.2),
+# ensuring Velopack and the audit tool anchor 100% to the previous official release!
+print(f"Checking pre-existing release/tag for {target_clean_tag} on GitHub...", flush=True)
+try:
+    rel_resp = session.get(f"{api_base}/releases/tags/{target_clean_tag}")
+    if rel_resp.status_code == 200:
+        rel_id = rel_resp.json().get("id")
+        if rel_id:
+            del_rel = session.delete(f"{api_base}/releases/{rel_id}")
+            if del_rel.status_code in (200, 204):
+                print(f"[PRE-CLEAN] Deleted existing GitHub Release object for {target_clean_tag} (ID: {rel_id}) to restore clean base.", flush=True)
+                time.sleep(1.0)
+    del_tag = session.delete(f"{api_base}/git/refs/tags/{target_clean_tag}")
+    if del_tag.status_code in (200, 204):
+        print(f"[PRE-CLEAN] Deleted existing remote Git Tag ref {target_clean_tag}.", flush=True)
+        time.sleep(1.0)
+except Exception as e:
+    print(f"Notice: Pre-cleanup error: {e}", flush=True)
+
+# 0b. Mandatory Pre-Push Audit: Compare against last official release (< CURRENT_VERSION)
 try:
     from scripts.audit_release_diff import run_audit
     run_audit()
@@ -216,14 +251,6 @@ else:
     print(f"\n[THANH CONG] Toan bo ma nguon da duoc dong bo len branch main (Commit: {new_commit_sha[:7]})!", flush=True)
 
 # 8. Create tag ONLY if explicitly requested via command line (e.g. --tag v1.1.1)
-import sys
-requested_tag = None
-for i, arg in enumerate(sys.argv):
-    if arg == "--tag" and i + 1 < len(sys.argv):
-        requested_tag = sys.argv[i + 1]
-    elif arg.startswith("--tag="):
-        requested_tag = arg.split("=", 1)[1]
-
 if requested_tag:
     tag_name = requested_tag if requested_tag.startswith("v") else f"v{requested_tag}"
     tag_ref = f"refs/tags/{tag_name}"

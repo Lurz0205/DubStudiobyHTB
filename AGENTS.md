@@ -44,6 +44,7 @@ Pipeline: local video import -> audio extraction -> vocal/BGM separation -> ASR 
   (1) Sau khi sửa code và kiểm thử xong (`pytest tests/ -q`), dùng `scripts/push_code_to_github.py` để đẩy mã nguồn lên GitHub `main`.
   (2) GitHub Actions (`.github/workflows/build_release.yml`) trên Azure tự động build, package bằng Velopack (`vpk pack --noPortable`), và gắn release (`Setup.exe`, `full.nupkg`, `delta.nupkg`) trực tiếp trên mây. Tuyệt đối không upload file nặng từ máy local qua WiFi chập chờn.
   (3) Packaged mode (`is_packaged() == True`) phải độc lập, không tham chiếu dev `.venv`. Kiểm thử máy người dùng bằng `scripts/sim_user_machine.ps1`. Mọi subprocess chạy ngầm phải dùng `get_subprocess_env()` và `get_subprocess_kwargs()` (`CREATE_NO_WINDOW` / `SW_HIDE`).
+  (4) Khóa mốc so sánh Release: Luôn lấy mốc so sánh (audit & delta package) từ bản release chính thức trước đó trên GitHub (`tag_version < CURRENT_VERSION`, ví dụ 1.1.2 khi phát hành 1.1.3), tuyệt đối không so với các bản debug cùng phiên bản. Phải xóa sạch tag/release trùng phiên bản trên GitHub trước khi tải delta để đảm bảo Velopack cắt delta chuẩn 100%.
 
 ## 4. Environment (fixed facts)
 

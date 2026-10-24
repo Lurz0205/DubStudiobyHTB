@@ -35,6 +35,7 @@ Start-Sleep -Milliseconds 500
     --exclude-module pandas `
     --exclude-module dask `
     --exclude-module cupy `
+    --exclude-module tzdata `
     --add-data "ui;ui" `
     --add-data "dubstudio;dubstudio" `
     --add-data "config;config" `
@@ -42,6 +43,11 @@ Start-Sleep -Milliseconds 500
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "PyInstaller build failed."
+}
+
+# Remove tzdata if present to prevent Windows symlink packaging failures
+if (Test-Path "$Root\dist\DubStudio\_internal\tzdata") {
+    Remove-Item -Path "$Root\dist\DubStudio\_internal\tzdata" -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # Ensure bin (ffmpeg, ffprobe) is present in dist\DubStudio
@@ -60,6 +66,7 @@ $Vpk = "$env:USERPROFILE\.dotnet\tools\vpk.exe"
 if (Test-Path $Vpk) {
     $Version = (& $Py -c "from dubstudio.version import APP_VERSION; print(APP_VERSION)").Trim()
     Write-Host "Packaging with Velopack (v$Version) into dist\releases..." -ForegroundColor Cyan
+    Remove-Item -Path "$Root\dist\releases\*" -Recurse -Force -ErrorAction SilentlyContinue
     & $Vpk pack `
         --packId DubStudio `
         --packVersion $Version `

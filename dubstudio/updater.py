@@ -175,7 +175,8 @@ def repair_and_clean_cache() -> Dict[str, Any]:
     freed_bytes: int = 0
 
     # 1. Workspace cache
-    ws_cache = Path("workspace/.cache")
+    from dubstudio.paths import get_workspace_dir
+    ws_cache = get_workspace_dir() / ".cache"
     if ws_cache.exists():
         try:
             for p in ws_cache.rglob("*"):

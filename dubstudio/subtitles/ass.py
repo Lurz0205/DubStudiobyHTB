@@ -301,6 +301,61 @@ def make_rounded_box_path(w: int, h: int, r: int) -> str:
     )
 
 
+def measure_text_box(
+    text: str,
+    font_name: str,
+    font_px: int,
+    pad_x: int,
+    pad_y: int,
+    box_mode: str,
+    box_width_pct: float,
+    video_width: int,
+    text_align: str = "center",
+) -> tuple[int, int]:
+    """Measure exact subtitle box width and height matching Qt QFontMetrics 1:1."""
+    clean_text = text.replace(r"\N", "\n")
+    try:
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtGui import QFont, QFontMetrics
+        from PyQt6.QtCore import QRect, Qt
+        import sys
+        if not QApplication.instance():
+            _app = QApplication(sys.argv)
+        f = QFont(font_name)
+        f.setPixelSize(font_px)
+        f.setBold(True)
+        fm = QFontMetrics(f)
+        flags = Qt.TextFlag.TextWordWrap
+        if text_align == "left":
+            flags |= (Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        elif text_align == "right":
+            flags |= (Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        else:
+            flags |= Qt.AlignmentFlag.AlignCenter
+
+        if box_mode == "wrap_text":
+            target_w = max(40, int(round(video_width * 0.95)))
+            bound = fm.boundingRect(QRect(0, 0, max(40, target_w - pad_x * 2), 2000), flags, clean_text)
+            w = min(target_w, bound.width() + pad_x * 2)
+            h = bound.height() + pad_y * 2
+        else:
+            w = int(round(video_width * (box_width_pct / 100.0)))
+            bound = fm.boundingRect(QRect(0, 0, max(40, w - pad_x * 2), 2000), flags, clean_text)
+            h = bound.height() + pad_y * 2
+        return max(40, w), max(20, h)
+    except Exception:
+        lines = clean_text.splitlines() if clean_text else [""]
+        num_lines = max(1, len(lines))
+        line_h = int(round(font_px * 1.16))
+        h = num_lines * line_h + pad_y * 2
+        if box_mode == "wrap_text":
+            max_chars = max(len(l.strip()) for l in lines) if lines else 10
+            w = min(int(round(video_width * 0.95)), int(round(max_chars * font_px * 0.58)) + pad_x * 2)
+        else:
+            w = int(round(video_width * (box_width_pct / 100.0)))
+        return max(40, w), max(20, h)
+
+
 def generate_ass_subtitles(
     segments_or_units: List[Dict[str, Any]],
     output_path: Path,
@@ -363,6 +418,9 @@ def generate_ass_subtitles(
 
     # Scaled dimensions in video pixel coordinates matching preview 1:1
     ass_font_size = max(12, int(round(font_size * scale_v)))
+    # Compensate for Windows GDI / libass internal leading font scaling difference (~1.116x)
+    ass_font_size_libass = max(12, int(round(ass_font_size * 1.116)))
+
     ass_outline_width = max(1, int(round(outline_width * scale_v)))
     ass_margin_v = max(5, int(round(margin_v * scale_v)))
     ass_box_radius = max(0, int(round(box_radius * scale_v)))
@@ -392,7 +450,7 @@ PlayResY: {video_height}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font_name},{ass_font_size},{primary_color},&H000000FF,{outline_color},&H00000000,-1,0,0,0,100,100,0,0,1,{ass_outline_width},0,5,0,0,0,1
+Style: Default,{font_name},{ass_font_size_libass},{primary_color},&H000000FF,{outline_color},&H00000000,-1,0,0,0,100,100,0,0,1,{ass_outline_width},0,5,0,0,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -421,18 +479,19 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         start_str = format_ass_time(sl_start)
         end_str = format_ass_time(sl_end)
         wrapped_text = wrap_balanced_lines(sl_text, max_chars_per_line=max_chars_per_line)
-        lines = wrapped_text.split(r"\N")
-        lines_count = len(lines)
-        text_h = int(round(ass_font_size * 0.88 + max(0, lines_count - 1) * (ass_font_size * 1.16)))
-        box_h = text_h + int(round(ass_pad_y * 2))
 
-        if has_box and box_mode == "wrap_text":
-            max_line_len = max(len(l.strip()) for l in lines)
-            approx_text_w = int(round(max_line_len * ass_font_size * 0.54))
-            box_w = min(int(round(video_width * 0.95)), approx_text_w + ass_pad_x * 2)
-            box_w = max(box_w, int(round(ass_font_size * 3.5)))
-        else:
-            box_w = int(round(video_width * (box_width_pct / 100.0)))
+        # Measure 1:1 box width and height matching Preview
+        box_w, box_h = measure_text_box(
+            text=wrapped_text,
+            font_name=font_name,
+            font_px=ass_font_size,
+            pad_x=ass_pad_x,
+            pad_y=ass_pad_y,
+            box_mode=box_mode,
+            box_width_pct=box_width_pct,
+            video_width=video_width,
+            text_align=align_mode,
+        )
 
         box_left = int(round((video_width - box_w) / 2.0))
         if style and style.get("pos_y_pct") is not None:
@@ -446,13 +505,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             box_top = int(round(video_height - ass_margin_v - box_h))
 
         cx = int(round(box_left + box_w / 2.0))
-        cy = int(round(box_top + box_h / 2.0 - ass_font_size * 0.04))
+        cy = int(round(box_top + box_h / 2.0))
 
         if align_mode == "left":
-            tx = int(round(box_left + ass_font_size * 0.8))
+            tx = int(round(box_left + ass_pad_x))
             text_override = f"{{\\pos({tx},{cy})\\an4\\b1}}"
         elif align_mode == "right":
-            tx = int(round(box_left + box_w - ass_font_size * 0.8))
+            tx = int(round(box_left + box_w - ass_pad_x))
             text_override = f"{{\\pos({tx},{cy})\\an6\\b1}}"
         else:  # "center"
             text_override = f"{{\\pos({cx},{cy})\\an5\\b1}}"
@@ -474,3 +533,4 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     full_content = header + "\n".join(events) + "\n"
     output_path.write_text(full_content, encoding="utf-8")
     return output_path
+

@@ -408,7 +408,7 @@ class SubtitleExportPage(QWidget):
         grid_audio.addWidget(QLabel("Nhạc nền:"), 1, 0)
         h_bgm = QHBoxLayout()
         self._slider_orig_bgm = QSlider(Qt.Orientation.Horizontal)
-        self._slider_orig_bgm.setRange(0, 100)
+        self._slider_orig_bgm.setRange(0, 200)
         self._slider_orig_bgm.setValue(80)
         self._slider_orig_bgm.valueChanged.connect(self._on_orig_bgm_slider_changed)
         h_bgm.addWidget(self._slider_orig_bgm, 1)
@@ -444,7 +444,7 @@ class SubtitleExportPage(QWidget):
         grid_audio.addWidget(self._lbl_custom_bgm_vol_title, 3, 0)
         h_custom_bgm_vol = QHBoxLayout()
         self._slider_custom_bgm = QSlider(Qt.Orientation.Horizontal)
-        self._slider_custom_bgm.setRange(0, 100)
+        self._slider_custom_bgm.setRange(0, 200)
         self._slider_custom_bgm.setValue(50)
         self._slider_custom_bgm.setEnabled(False)
         self._slider_custom_bgm.valueChanged.connect(self._on_custom_bgm_slider_changed)
@@ -465,7 +465,7 @@ class SubtitleExportPage(QWidget):
         grid_audio.addWidget(self._lbl_orig_voice_title, 5, 0)
         h_orig = QHBoxLayout()
         self._slider_orig_voice = QSlider(Qt.Orientation.Horizontal)
-        self._slider_orig_voice.setRange(0, 100)
+        self._slider_orig_voice.setRange(0, 200)
         self._slider_orig_voice.setValue(0)
         self._slider_orig_voice.setEnabled(False)
         self._slider_orig_voice.valueChanged.connect(self._on_orig_voice_slider_changed)
@@ -482,14 +482,22 @@ class SubtitleExportPage(QWidget):
         card_audio.add_divider()
 
         # Output Folder row
+        from dubstudio.paths import get_out_dir
+        curr_out = get_out_dir()
         h_out_row = QHBoxLayout()
-        self._lbl_out_path = QLabel("out/")
-        self._lbl_out_path.setStyleSheet("color: #888888; font-size: 11px;")
+        self._lbl_out_path = QLabel(f"📁 {curr_out.name}/")
+        self._lbl_out_path.setToolTip(str(curr_out))
+        self._lbl_out_path.setStyleSheet("color: #94a3b8; font-size: 11px;")
         h_out_row.addWidget(self._lbl_out_path, 1)
+
+        btn_change_out = QPushButton(" Đổi thư mục")
+        btn_change_out.setIcon(get_icon("edit", "#9ca3af", "#f0f2f5", 13))
+        btn_change_out.clicked.connect(self._change_output_folder)
+        h_out_row.addWidget(btn_change_out)
 
         btn_open_out = QPushButton(" Mở thư mục")
         btn_open_out.setIcon(get_icon("folder", "#9ca3af", "#f0f2f5", 14))
-        btn_open_out.clicked.connect(self._open_output_folder)
+        btn_open_out.clicked.connect(lambda: self._open_output_folder())
         h_out_row.addWidget(btn_open_out)
 
         card_audio.add_layout(h_out_row)
@@ -1251,22 +1259,31 @@ class SubtitleExportPage(QWidget):
                 self._video_player.set_overlay_preview_visible(False)
 
             vid_path = res.get("video_path")
+            from dubstudio.paths import get_out_dir, open_in_file_manager
+            target_p = Path(vid_path).resolve() if vid_path else (get_out_dir() / res.get("filename", ""))
+
             if vid_path and Path(vid_path).exists():
                 self._video_player.load_video(vid_path)
 
             msg = QMessageBox(self)
             msg.setWindowTitle("Xuất video thành công")
-            msg.setText(f"Đã xuất thành công video có phụ đề và lồng tiếng:\n\n{res.get('filename')}")
-            btn_play = msg.addButton("Xem video", QMessageBox.ButtonRole.AcceptRole)
-            btn_folder = msg.addButton("Mở thư mục", QMessageBox.ButtonRole.ActionRole)
-            msg.addButton(QMessageBox.StandardButton.Close)
+            msg.setText(
+                f"Đã xuất thành công video có phụ đề và lồng tiếng:\n\n"
+                f"📹 Tập tin: {res.get('filename')}\n"
+                f"📂 Thư mục: {target_p.parent}"
+            )
+            btn_play = msg.addButton("Xem video ngay", QMessageBox.ButtonRole.AcceptRole)
+            btn_folder = msg.addButton("Mở thư mục video", QMessageBox.ButtonRole.ActionRole)
+            msg.addButton("Đóng", QMessageBox.ButtonRole.RejectRole)
 
             msg.exec()
             if msg.clickedButton() == btn_play:
-                if vid_path and Path(vid_path).exists():
+                if target_p.exists():
+                    open_in_file_manager(target_p)
+                elif hasattr(self, "_video_player") and self._video_player:
                     self._video_player.play()
             elif msg.clickedButton() == btn_folder:
-                self._open_output_folder()
+                self._open_output_folder(target_p)
 
         def _on_err(err: str):
             self._btn_render.setEnabled(True)
@@ -1279,10 +1296,21 @@ class SubtitleExportPage(QWidget):
         self._workers.append(w)
         w.start()
 
-    def _open_output_folder(self):
-        out_path = Path("out").resolve()
-        out_path.mkdir(parents=True, exist_ok=True)
-        if sys.platform == "win32":
-            os.startfile(str(out_path))
-        else:
-            subprocess.run(["xdg-open", str(out_path)])
+    def _change_output_folder(self):
+        """Allow user to select custom export directory and persist."""
+        from dubstudio.paths import get_out_dir
+        new_dir = QFileDialog.getExistingDirectory(self, "Chọn thư mục lưu video xuất", str(get_out_dir()))
+        if new_dir:
+            os.environ["DUBSTUDIO_OUT_DIR"] = new_dir
+            p = Path(new_dir).resolve()
+            self._lbl_out_path.setText(f"📁 .../{p.name}")
+            self._lbl_out_path.setToolTip(str(p))
+
+    def _open_output_folder(self, target_file: Optional[Path | str] = None):
+        """Open file manager at the output directory, highlighting target file if provided."""
+        from dubstudio.paths import get_out_dir, open_in_file_manager
+        out_dir = get_out_dir()
+        target = Path(target_file).resolve() if target_file else out_dir
+        if not target.exists():
+            target = out_dir
+        open_in_file_manager(target)

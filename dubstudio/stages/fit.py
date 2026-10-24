@@ -434,10 +434,19 @@ def run(job: JobContext, cfg: AppConfig) -> None:
     can_rewrite = has_api_key or is_gemini_web
 
     rewriter = FitRewriter(cfg=cfg, cache_dir=job.workspace / ".cache" / "llm")
-    shrink_factors = [0.88, 0.72, 0.60]
 
     for pass_idx in range(1, MAX_REWRITE_PASSES + 1):
-        shrink_factor = shrink_factors[min(pass_idx - 1, len(shrink_factors) - 1)]
+        # Calibrated ratios based on pass index:
+        # Pass 1: aims for 92% of max allowed window (natural fit with 1.05x-1.08x atempo, never underflows)
+        # Pass 2: aims for 86% if still overflowing
+        # Pass 3: aims for 80% (never cuts down to 60% which creates massive dead air)
+        if pass_idx == 1:
+            ideal_ratio, min_ratio, max_ratio = 0.92, 0.82, 0.96
+        elif pass_idx == 2:
+            ideal_ratio, min_ratio, max_ratio = 0.86, 0.78, 0.90
+        else:
+            ideal_ratio, min_ratio, max_ratio = 0.80, 0.72, 0.85
+
         mismatched_units: List[Dict[str, Any]] = []
 
         for idx, seg in enumerate(segments):
@@ -473,7 +482,11 @@ def run(job: JobContext, cfg: AppConfig) -> None:
                         seg["voice_start"] = new_st
                     else:
                         cps = len(seg.get("tts_text") or seg.get("vi_text", "")) / max(0.1, tts_dur)
-                        target_chars = max(10, int(round(new_max_audio * cps * shrink_factor)))
+                        min_chars = max(8, int(round(new_max_audio * cps * min_ratio)))
+                        max_chars = max(10, int(round(new_max_audio * cps * max_ratio)))
+                        ideal_chars = int(round(new_max_audio * cps * ideal_ratio))
+                        target_chars = max(min_chars, min(max_chars, ideal_chars))
+
                         mismatched_units.append({
                             "id": seg["id"],
                             "idx": idx,
@@ -483,7 +496,9 @@ def run(job: JobContext, cfg: AppConfig) -> None:
                             "measured_dur": tts_dur,
                             "max_audio_dur": new_max_audio,
                             "direction": "shorter",
+                            "min_chars": min_chars,
                             "target_chars": target_chars,
+                            "max_chars": max_chars,
                             "prev_vi": segments[idx - 1].get("vi_text", "") if idx > 0 else "",
                             "next_vi": segments[idx + 1].get("vi_text", "") if idx + 1 < len(segments) else "",
                         })
@@ -493,6 +508,8 @@ def run(job: JobContext, cfg: AppConfig) -> None:
                 if tts_dur < 0.65 * orig_dur and orig_dur >= 2.0 and (next_st - (st + tts_dur)) > 1.2:
                     cps = len(seg.get("tts_text") or seg.get("vi_text", "")) / max(0.1, tts_dur)
                     target_chars = int(round(orig_dur * cps * 0.95))
+                    min_chars = max(8, int(round(orig_dur * cps * 0.85)))
+                    max_chars = max(10, int(round(orig_dur * cps * 1.05)))
                     mismatched_units.append({
                         "id": seg["id"],
                         "idx": idx,
@@ -502,7 +519,9 @@ def run(job: JobContext, cfg: AppConfig) -> None:
                         "measured_dur": tts_dur,
                         "max_audio_dur": round(orig_dur, 2),
                         "direction": "longer",
+                        "min_chars": min_chars,
                         "target_chars": target_chars,
+                        "max_chars": max_chars,
                         "prev_vi": segments[idx - 1].get("vi_text", "") if idx > 0 else "",
                         "next_vi": segments[idx + 1].get("vi_text", "") if idx + 1 < len(segments) else "",
                     })

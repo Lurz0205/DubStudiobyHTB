@@ -59,7 +59,8 @@ def trim_video(
     duration = end_s - start_s
 
     if output_path is None:
-        out_dir = Path("out")
+        from dubstudio.paths import get_out_dir
+        out_dir = get_out_dir()
         out_dir.mkdir(parents=True, exist_ok=True)
         stem = v_path.stem
         start_tag = f"{int(start_s)}s"

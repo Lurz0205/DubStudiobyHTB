@@ -78,6 +78,27 @@ jobs:
           Remove-Item -Path "ffmpeg.zip", "ffmpeg_extracted" -Recurse -Force -ErrorAction SilentlyContinue
           Write-Host "FFmpeg successfully placed in bin/"
 
+      - name: Clean Conflicting Remote Release Before Download
+        shell: pwsh
+        run: |
+          $tag = "$env:TAG"
+          $headers = @{
+            "Authorization" = "token ${{ secrets.GITHUB_TOKEN }}"
+            "Accept" = "application/vnd.github.v3+json"
+            "User-Agent" = "GitHub-Actions-Velopack"
+          }
+          try {
+            $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases" -Headers $headers
+            foreach ($rel in $releases) {
+              if ($rel.tag_name -eq $tag) {
+                Write-Host "Found existing release for $tag (ID: $($rel.id)). Deleting so vpk download anchors cleanly to previous release..."
+                Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/${{ github.repository }}/releases/$($rel.id)" -Headers $headers
+              }
+            }
+          } catch {
+            Write-Host "Pre-download cleanup notice: $_"
+          }
+
       - name: Download Previous Release for Delta Generation
         shell: pwsh
         run: |
@@ -119,10 +140,16 @@ jobs:
             --exclude-module pandas `
             --exclude-module dask `
             --exclude-module cupy `
+            --exclude-module tzdata `
             --add-data "ui;ui" `
             --add-data "dubstudio;dubstudio" `
             --add-data "config;config" `
             "start_app.py"
+
+          # Remove tzdata if present to prevent Windows symlink packaging failures
+          if (Test-Path "dist\DubStudio\_internal\tzdata") {
+            Remove-Item -Path "dist\DubStudio\_internal\tzdata" -Recurse -Force -ErrorAction SilentlyContinue
+          }
 
           # Copy bin (ffmpeg, ffprobe) to dist/DubStudio/bin
           if (Test-Path "bin") {

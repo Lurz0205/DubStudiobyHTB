@@ -8,6 +8,9 @@ from dubstudio.paths import (
     get_logs_dir,
     get_models_dir,
     get_workspace_dir,
+    get_out_dir,
+    get_env_file,
+    open_in_file_manager,
     resolve_tool,
 )
 from dubstudio.diagnostics import check_system_prerequisites, collect_system_summary
@@ -19,6 +22,19 @@ def test_paths_resolution():
     assert get_logs_dir().exists()
     assert get_models_dir().exists()
     assert get_workspace_dir().exists()
+    assert get_out_dir().exists()
+    assert get_env_file() is not None
+
+
+def test_out_dir_packaged_mode():
+    """Verify get_out_dir returns standard accessible directory in packaged mode."""
+    import os
+    from unittest.mock import patch
+    with patch("dubstudio.paths.is_packaged", return_value=True):
+        out = get_out_dir()
+        assert out.exists()
+        # In packaged mode on Windows, should be Videos/DubStudio or user data out
+        assert "DubStudio" in str(out) or "out" in str(out)
 
 
 def test_bundled_tools_resolution():

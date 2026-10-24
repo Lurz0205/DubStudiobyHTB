@@ -838,14 +838,15 @@ class MergePage(QWidget):
         found: List[tuple[str, dict]] = []
 
         # Out rendered videos
-        out_dir = Path("out")
+        from dubstudio.paths import get_out_dir, get_workspace_dir, resolve_job_workspace, open_in_file_manager
+        out_dir = get_out_dir()
         if out_dir.exists():
             for f in out_dir.glob("*_vi.mp4"):
                 j_id = f.stem.replace("_vi", "")
                 found.append((f"Xuất phẩm: {f.name}", {"path": str(f.resolve()), "job_id": j_id}))
 
         # Workspace inputs
-        ws_dir = Path("workspace")
+        ws_dir = get_workspace_dir()
         if ws_dir.exists():
             for j_dir in ws_dir.iterdir():
                 if j_dir.is_dir():
@@ -906,14 +907,15 @@ class MergePage(QWidget):
 
     def _load_project_subtitles(self, job_id: str):
         """Load subtitles and styling from project workspace to enable 1:1 live preview and export."""
-        ws_job = Path("workspace") / job_id
+        from dubstudio.paths import resolve_job_workspace, get_out_dir
+        ws_job = resolve_job_workspace(job_id)
         seg_file = ws_job / "segments.json"
         if not seg_file.exists():
             seg_file = ws_job / "raw_segments.json"
         style_file = ws_job / "style.json"
         ass_file = ws_job / "subtitles.ass"
         if not ass_file.exists():
-            out_ass = Path("out") / f"{job_id}_vi.ass"
+            out_ass = get_out_dir() / f"{job_id}_vi.ass"
             if out_ass.exists():
                 ass_file = out_ass
 
@@ -1122,7 +1124,8 @@ class MergePage(QWidget):
             self._lbl_video_dims.setText(f"Độ phân giải: {self._video_w} x {self._video_h}")
 
             # If job_id not set or mismatch, try to infer from video path
-            if not self._job_id or not (Path("workspace") / self._job_id).exists():
+            from dubstudio.paths import resolve_job_workspace, open_in_file_manager
+            if not self._job_id or not resolve_job_workspace(self._job_id).exists():
                 inferred_jid = ""
                 if p.parent.parent.name == "workspace" and p.parent.exists():
                     inferred_jid = p.parent.name
@@ -1349,7 +1352,8 @@ class MergePage(QWidget):
                 QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Ok,
             )
             if reply == QMessageBox.StandardButton.Open:
-                os.startfile(Path("out").resolve())
+                from dubstudio.paths import open_in_file_manager
+                open_in_file_manager(Path(out_path) if out_path else get_out_dir())
 
         def _on_err(err: str):
             self._btn_run_edit.setEnabled(True)
@@ -1840,11 +1844,8 @@ class MergePage(QWidget):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply == QMessageBox.StandardButton.Yes:
-                from PyQt6.QtGui import QDesktopServices
-                from PyQt6.QtCore import QUrl
-                p = Path(out_path).resolve()
-                if p.exists():
-                    QDesktopServices.openUrl(QUrl.fromLocalFile(str(p.parent)))
+                from dubstudio.paths import open_in_file_manager
+                open_in_file_manager(Path(out_path) if out_path else get_out_dir())
 
         def _on_err(err: str):
             self._btn_run_trim.setEnabled(True)

@@ -1,6 +1,8 @@
 """Video preview widget using QtMultimedia for synchronized video and audio playback."""
 from __future__ import annotations
 
+import os
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -312,15 +314,13 @@ class AudioPrepWorker(QThread):
 
             if vi_wav and vi_wav.exists():
                 res["vi_raw"] = str(vi_wav.resolve())
-                VideoPlayerWidget._ensure_boosted_track(vi_wav)
-                if self.vi_voice_vol > 1.0:
-                    boosted = vi_wav.parent / "voice_boosted_200.wav"
-                    res["vi_voice"] = str(boosted.resolve()) if boosted.exists() else str(vi_wav.resolve())
-                else:
-                    res["vi_voice"] = str(vi_wav.resolve())
+                boosted_vi = VideoPlayerWidget._ensure_boosted_voice_track(vi_wav)
+                res["vi_voice"] = str(boosted_vi.resolve()) if (boosted_vi and boosted_vi.exists()) else str(vi_wav.resolve())
 
             if bgm_wav and bgm_wav.exists():
-                res["bgm"] = str(bgm_wav.resolve())
+                res["bgm_raw"] = str(bgm_wav.resolve())
+                boosted_bgm = VideoPlayerWidget._ensure_boosted_bgm_track(bgm_wav)
+                res["bgm"] = str(boosted_bgm.resolve()) if (boosted_bgm and boosted_bgm.exists()) else str(bgm_wav.resolve())
 
             if vocals_wav and vocals_wav.exists():
                 res["vocals"] = str(vocals_wav.resolve())
@@ -902,14 +902,19 @@ class VideoPlayerWidget(QWidget):
 
         if fast_vi:
             self._vi_voice_raw_path = str(fast_vi.resolve())
-            boosted = fast_vi.parent / "voice_boosted_200.wav"
-            if vi_voice_vol > 1.0 and boosted.exists():
-                self._vi_voice_path = str(boosted.resolve())
+            boosted_vi = fast_vi.parent / "voice_boosted_200_v2.wav"
+            if boosted_vi.exists() and boosted_vi.stat().st_mtime >= fast_vi.stat().st_mtime and boosted_vi.stat().st_size > 44:
+                self._vi_voice_path = str(boosted_vi.resolve())
             else:
                 self._vi_voice_path = str(fast_vi.resolve())
             self._vi_voice_player.setSource(QUrl.fromLocalFile(self._vi_voice_path))
         if fast_bgm:
-            self._orig_bgm_path = str(fast_bgm.resolve())
+            self._orig_bgm_raw_path = str(fast_bgm.resolve())
+            boosted_bgm = fast_bgm.parent / f"{fast_bgm.stem}_boosted_200_v2.wav"
+            if boosted_bgm.exists() and boosted_bgm.stat().st_mtime >= fast_bgm.stat().st_mtime and boosted_bgm.stat().st_size > 44:
+                self._orig_bgm_path = str(boosted_bgm.resolve())
+            else:
+                self._orig_bgm_path = str(fast_bgm.resolve())
             self._orig_bgm_player.setSource(QUrl.fromLocalFile(self._orig_bgm_path))
         if fast_voc:
             self._orig_voice_path = str(fast_voc.resolve())
@@ -953,36 +958,22 @@ class VideoPlayerWidget(QWidget):
                 self._audio_output.setVolume(1.0)
             return
 
-        pos = self._player.position()
-        is_playing = (self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState)
-
         if "vi_voice" in res:
             target_vi = res["vi_voice"]
             self._vi_voice_raw_path = res.get("vi_raw", target_vi)
             if getattr(self, "_vi_voice_path", None) != target_vi:
-                self._vi_voice_path = target_vi
-                self._vi_voice_player.setSource(QUrl.fromLocalFile(target_vi))
-                self._vi_voice_player.setPosition(pos)
-                if is_playing:
-                    self._vi_voice_player.play()
+                self._switch_track_source(self._vi_voice_player, "_vi_voice_path", target_vi)
 
         if "bgm" in res:
             target_bgm = res["bgm"]
+            self._orig_bgm_raw_path = res.get("bgm_raw", target_bgm)
             if getattr(self, "_orig_bgm_path", None) != target_bgm:
-                self._orig_bgm_path = target_bgm
-                self._orig_bgm_player.setSource(QUrl.fromLocalFile(target_bgm))
-                self._orig_bgm_player.setPosition(pos)
-                if is_playing:
-                    self._orig_bgm_player.play()
+                self._switch_track_source(self._orig_bgm_player, "_orig_bgm_path", target_bgm)
 
         if "vocals" in res:
             target_voc = res["vocals"]
             if getattr(self, "_orig_voice_path", None) != target_voc:
-                self._orig_voice_path = target_voc
-                self._orig_voice_player.setSource(QUrl.fromLocalFile(target_voc))
-                self._orig_voice_player.setPosition(pos)
-                if is_playing:
-                    self._orig_voice_player.play()
+                self._switch_track_source(self._orig_voice_player, "_orig_voice_path", target_voc)
 
         self._apply_stem_volumes()
 
@@ -1019,24 +1010,32 @@ class VideoPlayerWidget(QWidget):
         self._apply_stem_volumes()
 
     @staticmethod
-    def _ensure_boosted_track(raw_path: Optional[Path]) -> Optional[Path]:
-        """Pre-generate studio-mastered 200% (+6 dB true acoustic power) voice track."""
+    def _ensure_boosted_voice_track(raw_path: Optional[Path]) -> Optional[Path]:
+        """Pre-generate studio-mastered vocal track using 48kHz, warm EQ, and Upward Compression + Limiter."""
         if not raw_path or not Path(raw_path).exists():
             return None
         raw_p = Path(raw_path).resolve()
-        boosted = raw_p.parent / "voice_boosted_200.wav"
+        boosted = raw_p.parent / "voice_boosted_200_v2.wav"
         if boosted.exists() and boosted.stat().st_mtime >= raw_p.stat().st_mtime and boosted.stat().st_size > 44:
             return boosted
         try:
             import os
+            import subprocess
             from dubstudio.paths import resolve_tool
             from dubstudio.packaging import get_subprocess_env, safe_subprocess_run
             ffmpeg_exe = resolve_tool("ffmpeg")
-            tmp_boosted = raw_p.parent / f"voice_boosted_200.tmp_{os.getpid()}.wav"
+            tmp_boosted = raw_p.parent / f"voice_boosted_200_v2.tmp_{os.getpid()}.wav"
             cmd = [
                 ffmpeg_exe, "-y",
                 "-i", str(raw_p),
-                "-filter:a", "highpass=f=80,equalizer=f=3200:t=q:w=1.5:g=3.0,equalizer=f=120:t=q:w=1.2:g=1.5,acompressor=threshold=-18dB:ratio=2.5:attack=5:release=50:makeup=2dB,volume=2.0,alimiter=limit=0.98:attack=3:release=30",
+                "-filter:a", (
+                    "aresample=48000,"
+                    "highpass=f=80,"
+                    "equalizer=f=180:t=q:w=1.2:g=2.0,"
+                    "equalizer=f=5500:t=q:w=1.5:g=-2.5,"
+                    "acompressor=threshold=-23dB:ratio=3.0:attack=5:release=60:makeup=14dB,"
+                    "alimiter=limit=0.89:attack=3:release=40:level=disabled"
+                ),
                 str(tmp_boosted.resolve()),
             ]
             res = safe_subprocess_run(
@@ -1055,33 +1054,100 @@ class VideoPlayerWidget(QWidget):
             pass
         return raw_p
 
-    def _switch_vi_voice_source(self, target_path: str):
-        """Seamlessly switch vi_voice_player source without dropping position or playback."""
-        if getattr(self, "_vi_voice_path", None) == target_path:
+    @staticmethod
+    def _ensure_boosted_bgm_track(bgm_path: Optional[Path]) -> Optional[Path]:
+        """Pre-generate studio-mastered BGM track with wide dynamic range and transparent peak ceiling."""
+        if not bgm_path or not Path(bgm_path).exists():
+            return None
+        bgm_p = Path(bgm_path).resolve()
+        boosted = bgm_p.parent / f"{bgm_p.stem}_boosted_200_v2.wav"
+        if boosted.exists() and boosted.stat().st_mtime >= bgm_p.stat().st_mtime and boosted.stat().st_size > 44:
+            return boosted
+        try:
+            import os
+            import subprocess
+            from dubstudio.paths import resolve_tool
+            from dubstudio.packaging import get_subprocess_env, safe_subprocess_run
+            ffmpeg_exe = resolve_tool("ffmpeg")
+            tmp_boosted = bgm_p.parent / f"{bgm_p.stem}_boosted_200_v2.tmp_{os.getpid()}.wav"
+            cmd = [
+                ffmpeg_exe, "-y",
+                "-i", str(bgm_p),
+                "-filter:a", "aresample=48000,highpass=f=40,loudnorm=I=-14:TP=-0.8:LRA=9",
+                str(tmp_boosted.resolve()),
+            ]
+            res = safe_subprocess_run(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=get_subprocess_env(),
+            )
+            if res.returncode == 0 and tmp_boosted.exists():
+                try:
+                    os.replace(tmp_boosted, boosted)
+                    return boosted
+                except Exception:
+                    return tmp_boosted
+        except Exception:
+            pass
+        return bgm_p
+
+    # Backward compatibility alias
+    _ensure_boosted_track = _ensure_boosted_voice_track
+
+    @staticmethod
+    def _scale_volume_psychoacoustic(vol: float, is_boosted: bool) -> float:
+        """
+        Maps user slider [0.0, 2.0] into QAudioOutput gain [0.0, 1.0].
+        Psychoacoustic tuning:
+        - vol = 1.0 (100%): eff = 0.30 (standard natural listening reference)
+        - vol = 2.0 (200%): eff = 1.00 (+10.5 dB acoustic power = TRUE 2X PERCEIVED LOUDNESS!)
+        - vol in [0.0, 1.0]: smooth musical power curve
+        - vol in [1.0, 2.0]: powerful broadcast acoustic boost that cuts through any mix without clipping.
+        """
+        if vol <= 0.001:
+            return 0.0
+        v = max(0.0, min(2.0, float(vol)))
+        if is_boosted:
+            if v <= 1.0:
+                return round(0.30 * (v ** 1.3), 4)
+            else:
+                t = v - 1.0
+                return round(min(1.0, 0.30 + 0.70 * (t ** 1.15)), 4)
+        else:
+            return min(1.0, v * 0.5) if v <= 1.0 else min(1.0, 0.5 + 0.5 * (v - 1.0))
+
+    def _switch_track_source(self, player: QMediaPlayer, path_attr: str, target_path: str):
+        """Seamlessly switch an audio track's source file without dropping position or playback."""
+        if getattr(self, path_attr, None) == target_path:
             return
         pos = self._player.position()
         was_playing = (self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState)
-        self._vi_voice_path = target_path
+        setattr(self, path_attr, target_path)
 
         def _on_loaded(status: QMediaPlayer.MediaStatus):
             if status == QMediaPlayer.MediaStatus.LoadedMedia:
                 try:
-                    self._vi_voice_player.mediaStatusChanged.disconnect(_on_loaded)
+                    player.mediaStatusChanged.disconnect(_on_loaded)
                 except Exception:
                     pass
-                self._vi_voice_player.setPosition(pos)
+                player.setPosition(pos)
                 if was_playing:
-                    self._vi_voice_player.play()
+                    player.play()
 
-        self._vi_voice_player.mediaStatusChanged.connect(_on_loaded)
-        self._vi_voice_player.setSource(QUrl.fromLocalFile(target_path))
+        player.mediaStatusChanged.connect(_on_loaded)
+        player.setSource(QUrl.fromLocalFile(target_path))
+
+    def _switch_vi_voice_source(self, target_path: str):
+        self._switch_track_source(self._vi_voice_player, "_vi_voice_path", target_path)
 
     def _apply_stem_volumes(self):
         """
         Apply stem volumes across all 4 independent audio tracks.
-        For vi_voice:
-        - <= 100%: uses raw audio with linear scaling [0.0, 1.0].
-        - > 100%: uses studio-mastered boosted audio (+6 dB acoustic power) with progressive scaling.
+        For tracks loaded with boosted audio:
+        - Uses psychoacoustic power curve: 100% -> 0.30 (nominal), 200% -> 1.00 (+10.5 dB boost!).
+        For raw tracks (unboosted fallback):
+        - eff = max(0.0, min(1.0, vol))
         """
         vi_vol = getattr(self, "_vi_voice_vol", 1.0)
         bgm_vol = getattr(self, "_orig_bgm_vol", 0.8)
@@ -1089,14 +1155,17 @@ class VideoPlayerWidget(QWidget):
         include_orig = getattr(self, "_include_orig_voice", False)
         orig_voice_vol = getattr(self, "_orig_voice_vol", 0.0) if include_orig else 0.0
 
-        if vi_vol > 1.0:
-            eff_vi = max(0.0, min(1.0, 0.5 + 0.5 * (vi_vol - 1.0)))
-        else:
-            eff_vi = max(0.0, min(1.0, vi_vol))
+        vi_is_boosted = bool(self._vi_voice_path and "boosted_200_v2" in self._vi_voice_path)
+        eff_vi = self._scale_volume_psychoacoustic(vi_vol, vi_is_boosted)
 
-        eff_bgm = max(0.0, min(1.0, bgm_vol))
-        eff_custom = max(0.0, min(1.0, custom_vol))
-        eff_orig_voice = max(0.0, min(1.0, orig_voice_vol))
+        bgm_is_boosted = bool(self._orig_bgm_path and "boosted_200_v2" in self._orig_bgm_path)
+        eff_bgm = self._scale_volume_psychoacoustic(bgm_vol, bgm_is_boosted)
+
+        custom_is_boosted = bool(self._custom_bgm_path and "boosted_200_v2" in self._custom_bgm_path)
+        eff_custom = self._scale_volume_psychoacoustic(custom_vol, custom_is_boosted)
+
+        orig_voice_is_boosted = bool(self._orig_voice_path and "boosted_200_v2" in self._orig_voice_path)
+        eff_orig_voice = self._scale_volume_psychoacoustic(orig_voice_vol, orig_voice_is_boosted)
 
         self._vi_voice_audio.setVolume(eff_vi)
         self._vi_voice_audio.setMuted(eff_vi <= 0.001)
@@ -1112,30 +1181,17 @@ class VideoPlayerWidget(QWidget):
 
     def set_vi_voice_volume(self, volume: float):
         """Live adjust Vietnamese voice dubbing volume (supports 0.0 to 2.0 / up to 200%)."""
-        old_vol = getattr(self, "_vi_voice_vol", 1.0)
         self._vi_voice_vol = max(0.0, min(2.0, float(volume)))
-        raw_path = getattr(self, "_vi_voice_raw_path", None)
-
-        if raw_path and Path(raw_path).exists():
-            crossed_up = (old_vol <= 1.0 and self._vi_voice_vol > 1.0)
-            crossed_down = (old_vol > 1.0 and self._vi_voice_vol <= 1.0)
-            if crossed_up:
-                boosted = self._ensure_boosted_track(Path(raw_path))
-                if boosted and boosted.exists():
-                    self._switch_vi_voice_source(str(boosted.resolve()))
-            elif crossed_down:
-                self._switch_vi_voice_source(str(Path(raw_path).resolve()))
-
         self._apply_stem_volumes()
 
     def set_orig_bgm_volume(self, volume: float):
-        """Live adjust original video background music volume."""
-        self._orig_bgm_vol = max(0.0, min(1.0, float(volume)))
+        """Live adjust original video background music volume (supports 0.0 to 2.0 / up to 200%)."""
+        self._orig_bgm_vol = max(0.0, min(2.0, float(volume)))
         self._apply_stem_volumes()
 
     def set_custom_bgm(self, audio_path: Optional[str], volume: float = 0.5):
         """Set custom background music file and update live preview volume immediately."""
-        self._custom_bgm_vol = max(0.0, min(1.0, float(volume)))
+        self._custom_bgm_vol = max(0.0, min(2.0, float(volume)))
         self._bgm_volume = self._custom_bgm_vol
         if audio_path and Path(audio_path).exists():
             self._custom_bgm_path = str(Path(audio_path).resolve())
@@ -1159,7 +1215,7 @@ class VideoPlayerWidget(QWidget):
 
     def set_custom_bgm_volume(self, volume: float):
         """Live adjust custom BGM preview volume without restarting playback."""
-        self._custom_bgm_vol = max(0.0, min(1.0, float(volume)))
+        self._custom_bgm_vol = max(0.0, min(2.0, float(volume)))
         self._bgm_volume = self._custom_bgm_vol
         self._apply_stem_volumes()
 
@@ -1171,9 +1227,9 @@ class VideoPlayerWidget(QWidget):
             self.set_orig_bgm_volume(volume)
 
     def set_orig_voice_volume(self, volume: float, include: bool = True):
-        """Live adjust original voice volume and inclusion toggle."""
+        """Live adjust original voice volume and inclusion toggle (supports 0.0 to 2.0 / up to 200%)."""
         self._include_orig_voice = include
-        self._orig_voice_vol = max(0.0, min(1.0, float(volume)))
+        self._orig_voice_vol = max(0.0, min(2.0, float(volume)))
         self._apply_stem_volumes()
 
     def _stop_all_audio_tracks(self):
@@ -1183,6 +1239,7 @@ class VideoPlayerWidget(QWidget):
         self._vi_voice_path = None
         self._vi_voice_raw_path = None
         self._orig_bgm_path = None
+        self._orig_bgm_raw_path = None
         self._custom_bgm_path = None
         self._orig_voice_path = None
 
@@ -1315,7 +1372,7 @@ class VideoPlayerWidget(QWidget):
         self._time_label.setText(f"{_fmt(sec)} / {_fmt(self._duration)}")
         self.position_changed.emit(sec)
 
-        # Re-synchronize audio channels if drifting > 300ms
+        # Re-synchronize audio channels if drifting > 250ms or if channel stopped unexpectedly
         if self._multi_track_active and self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             for p, p_path in [
                 (self._vi_voice_player, self._vi_voice_path),
@@ -1323,8 +1380,16 @@ class VideoPlayerWidget(QWidget):
                 (self._custom_bgm_player, self._custom_bgm_path),
                 (self._orig_voice_player, self._orig_voice_path),
             ]:
-                if p_path and abs(p.position() - pos_ms) > 300:
-                    p.setPosition(pos_ms)
+                if p_path:
+                    if abs(p.position() - pos_ms) > 250:
+                        p.setPosition(pos_ms)
+                    if p.playbackState() != QMediaPlayer.PlaybackState.PlayingState and p.mediaStatus() in (
+                        QMediaPlayer.MediaStatus.LoadedMedia,
+                        QMediaPlayer.MediaStatus.BufferedMedia,
+                        QMediaPlayer.MediaStatus.BufferingMedia,
+                    ):
+                        p.setPosition(pos_ms)
+                        p.play()
 
     def _on_player_duration_changed(self, dur_ms: int):
         self._duration = dur_ms / 1000.0

@@ -210,6 +210,28 @@ def _quick_rebuild_voice_track(job_id: str) -> None:
         pass
 
 
+def _read_line_with_timeout(proc: subprocess.Popen, timeout_sec: float = 15.0) -> Optional[str]:
+    """Read a single line from process stdout with hard timeout to prevent deadlocks."""
+    if proc is None or proc.poll() is not None:
+        return None
+    line_box = []
+
+    def _reader():
+        try:
+            l = proc.stdout.readline()
+            if l:
+                line_box.append(l)
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_reader, daemon=True)
+    t.start()
+    t.join(timeout=timeout_sec)
+    if t.is_alive():
+        return None
+    return line_box[0] if line_box else None
+
+
 def get_tts_worker() -> subprocess.Popen:
     """Get or start the warm TTS worker process."""
     global _tts_worker_proc
@@ -220,11 +242,12 @@ def get_tts_worker() -> subprocess.Popen:
             cmd = [py_exe, "-m", "dubstudio.tts.worker_server"]
             sub_kwargs = get_subprocess_kwargs()
             sub_kwargs.pop("stdin", None)
+            sub_kwargs.pop("stderr", None)
             _tts_worker_proc = subprocess.Popen(
                 cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,  # Prevent OS pipe buffer deadlock
                 text=True,
                 encoding="utf-8",
                 bufsize=1,
@@ -237,21 +260,19 @@ def get_tts_worker() -> subprocess.Popen:
             except Exception:
                 pass
             _api_logger.info("Starting warm TTS worker process...")
+            ready_line = _read_line_with_timeout(_tts_worker_proc, timeout_sec=25.0)
             ready_data = None
-            for _ in range(60):
-                line = _tts_worker_proc.stdout.readline()
-                if not line:
-                    break
-                line_str = line.strip()
-                if not line_str:
-                    continue
+            if ready_line:
                 try:
-                    ready_data = json.loads(line_str)
-                    break
+                    ready_data = json.loads(ready_line.strip())
                 except Exception:
-                    continue
+                    pass
             if not ready_data or ready_data.get("status") != "ready":
-                err_msg = ready_data.get("error") if ready_data else "No response from worker"
+                err_msg = ready_data.get("error") if ready_data else "Worker startup timed out or failed"
+                try:
+                    _tts_worker_proc.terminate()
+                except Exception:
+                    pass
                 _tts_worker_proc = None
                 _api_logger.error(f"TTS worker failed to initialize: {err_msg}")
                 raise RuntimeError(f"TTS worker init error: {err_msg}")
@@ -469,9 +490,8 @@ class TrimVideoRequest(BaseModel):
 def _run_pipeline_worker(job_id: str, video_path: Path, subtitles_only: bool = False, dub_only: bool = False) -> None:
     global _active_job_id
     try:
-        # Stage Mutex on 4GB VRAM: Release persistent TTS worker before starting heavy separation/ASR stages
-        if not dub_only:
-            stop_tts_worker()
+        # Stage Mutex on 4GB VRAM: Always release persistent TTS worker before starting pipeline subprocess
+        stop_tts_worker()
 
         from dubstudio.packaging import get_runtime_python, get_subprocess_env, get_subprocess_kwargs
         py_exe = str(get_runtime_python().resolve())
@@ -1481,25 +1501,20 @@ def regenerate_segment_tts(job_id: str, seg_id: int, req: Optional[RegenTTSReque
             worker = get_tts_worker()
             worker.stdin.write(json.dumps(tts_payload, ensure_ascii=False) + "\n")
             worker.stdin.flush()
-            resp = None
-            for _ in range(40):
-                resp_line = worker.stdout.readline()
-                if not resp_line:
-                    break
-                resp_str = resp_line.strip()
-                if not resp_str:
-                    continue
-                try:
-                    resp = json.loads(resp_str)
-                    break
-                except Exception:
-                    continue
+            resp_line = _read_line_with_timeout(worker, timeout_sec=20.0)
+            if not resp_line:
+                stop_tts_worker()
+                raise RuntimeError("Warm worker response timed out")
+            resp = json.loads(resp_line.strip())
             if resp and resp.get("status") == "ok":
                 used_warm_worker = True
             else:
                 err = resp.get("error") if resp else "Empty response"
+                stop_tts_worker()
                 raise RuntimeError(f"Worker error: {err}")
-        except Exception:
+        except Exception as e:
+            _api_logger.warning(f"Warm TTS worker failed ({e}), falling back to single_tts...")
+            stop_tts_worker()
             # Fallback to single_tts subprocess (strictly serialized inside lock)
             from dubstudio.packaging import get_runtime_python, get_subprocess_env, get_subprocess_kwargs
             cmd = [
@@ -1813,7 +1828,8 @@ VIENEU_VOICES = [
 def preview_voice_api(voice: str = "Minh Đức"):
     """Generate or retrieve a short 2s audio preview for any selected voice."""
     cfg = AppConfig.load()
-    preview_dir = Path("out/voice_previews")
+    from dubstudio.paths import get_out_dir
+    preview_dir = get_out_dir() / "voice_previews"
     preview_dir.mkdir(parents=True, exist_ok=True)
     wav_path = preview_dir / f"{voice}.wav"
 
@@ -1825,35 +1841,31 @@ def preview_voice_api(voice: str = "Minh Đức"):
             "speed": 1.0,
             "out": str(wav_path.resolve()),
         }
-        try:
-            worker = get_tts_worker()
-            worker.stdin.write(json.dumps(tts_payload, ensure_ascii=False) + "\n")
-            worker.stdin.flush()
-            resp = None
-            for _ in range(15):
-                resp_line = worker.stdout.readline()
+        with _tts_worker_lock:
+            try:
+                worker = get_tts_worker()
+                worker.stdin.write(json.dumps(tts_payload, ensure_ascii=False) + "\n")
+                worker.stdin.flush()
+                resp_line = _read_line_with_timeout(worker, timeout_sec=15.0)
                 if not resp_line:
-                    break
-                resp_str = resp_line.strip()
-                if not resp_str:
-                    continue
-                try:
-                    resp = json.loads(resp_str)
-                    break
-                except Exception:
-                    continue
-            if not resp or resp.get("status") != "ok":
-                err = resp.get("error") if resp else "Empty response"
-                raise RuntimeError(f"Worker error: {err}")
-        except Exception:
-            cmd = [
-                sys.executable, "-m", "dubstudio.tts.single_tts",
-                "--text", sample_text,
-                "--voice", voice,
-                "--speed", "1.0",
-                "--out", str(wav_path.resolve()),
-            ]
-            subprocess.run(cmd, check=True)
+                    stop_tts_worker()
+                    raise RuntimeError("Warm worker preview response timed out")
+                resp = json.loads(resp_line.strip())
+                if not resp or resp.get("status") != "ok":
+                    err = resp.get("error") if resp else "Empty response"
+                    stop_tts_worker()
+                    raise RuntimeError(f"Worker error: {err}")
+            except Exception:
+                stop_tts_worker()
+                from dubstudio.packaging import get_runtime_python, get_subprocess_env, get_subprocess_kwargs
+                cmd = [
+                    str(get_runtime_python().resolve()), "-m", "dubstudio.tts.single_tts",
+                    "--text", sample_text,
+                    "--voice", voice,
+                    "--speed", "1.0",
+                    "--out", str(wav_path.resolve()),
+                ]
+                subprocess.run(cmd, check=True, env=get_subprocess_env(), **get_subprocess_kwargs())
 
     return FileResponse(wav_path, media_type="audio/wav")
 
@@ -1924,8 +1936,9 @@ def get_settings():
 def update_settings(req: SettingsRequest):
     """Save updated settings to .env file and environment."""
     from dotenv import load_dotenv
+    from dubstudio.paths import get_env_file
 
-    env_file = Path(".env")
+    env_file = get_env_file()
     lines = []
     if env_file.exists():
         lines = env_file.read_text(encoding="utf-8").splitlines()
@@ -2088,10 +2101,11 @@ def cdp_status_endpoint():
 def trim_video_api(req: TrimVideoRequest):
     """Trim a video segment with sub-second accuracy."""
     from dubstudio.tools.trim_video import trim_video
+    from dubstudio.paths import get_out_dir
     v_path = Path(req.video_path.strip())
     out_target = None
     if req.output_name:
-        out_target = Path("out") / req.output_name
+        out_target = get_out_dir() / req.output_name
     try:
         res = trim_video(
             video_path=v_path,
@@ -2117,8 +2131,9 @@ def trim_video_api(req: TrimVideoRequest):
 @app.post("/api/tools/merge")
 def merge_videos_api(req: MergeRequest):
     """Merge videos using merge_videos tool."""
+    from dubstudio.paths import get_out_dir
     video_paths = [Path(v) for v in req.videos]
-    out_path = Path("out") / req.output_name
+    out_path = get_out_dir() / req.output_name
     try:
         res = merge_videos(video_paths=video_paths, output_path=out_path, force_reencode=req.force_reencode)
         return {"status": "success", "merged_file": res.name, "path": str(res.resolve())}
@@ -2137,7 +2152,8 @@ def edit_video_api(req: EditVideoRequest):
 
     v_path = Path(req.video_path.strip())
     if not v_path.exists():
-        for prefix in [Path("samples"), Path("out"), Path(".")]:
+        from dubstudio.paths import get_out_dir
+        for prefix in [Path("samples"), get_out_dir(), Path("out"), Path(".")]:
             cand = prefix / req.video_path.strip()
             if cand.exists():
                 v_path = cand
@@ -2294,7 +2310,8 @@ def edit_video_api(req: EditVideoRequest):
             else:
                 overlay_img.paste(box_surf, (bx, by), box_surf)
 
-        cache_dir = Path("workspace/.cache/edit")
+        from dubstudio.paths import get_workspace_dir
+        cache_dir = get_workspace_dir() / ".cache" / "edit"
         cache_dir.mkdir(parents=True, exist_ok=True)
         boxes_png = (cache_dir / f"boxes_{uuid.uuid4().hex[:8]}.png").resolve()
         overlay_img.save(str(boxes_png))
@@ -2323,7 +2340,8 @@ def edit_video_api(req: EditVideoRequest):
         if img_p and Path(img_p).exists():
             target_img_file = Path(img_p).resolve()
         elif img_data:
-            cache_dir = Path("workspace/.cache/edit")
+            from dubstudio.paths import get_workspace_dir
+            cache_dir = get_workspace_dir() / ".cache" / "edit"
             cache_dir.mkdir(parents=True, exist_ok=True)
             temp_img = cache_dir / "overlay_temp.png"
             if "," in img_data:
@@ -2342,12 +2360,13 @@ def edit_video_api(req: EditVideoRequest):
 
     # 5. Vietnamese Subtitles burning (hard-sub from Tab Phụ đề)
     if req.subtitles_enabled:
+        from dubstudio.paths import get_workspace_dir, get_out_dir, resolve_job_workspace
         cand_ass = []
         if req.subtitles_path and Path(req.subtitles_path).exists():
             cand_ass.append(Path(req.subtitles_path))
         if req.job_id:
-            cand_ass.append(Path("workspace") / req.job_id / "subtitles.ass")
-            cand_ass.append(Path("out") / f"{req.job_id}_vi.ass")
+            cand_ass.append(resolve_job_workspace(req.job_id) / "subtitles.ass")
+            cand_ass.append(get_out_dir() / f"{req.job_id}_vi.ass")
         if v_path.parent.exists():
             cand_ass.append(v_path.parent / "subtitles.ass")
             cand_ass.append(v_path.parent.parent / "subtitles.ass")
@@ -2366,17 +2385,18 @@ def edit_video_api(req: EditVideoRequest):
                 jid = v_path.stem.replace("_vi", "")
 
         if not ass_file and jid:
-            seg_f = Path("workspace") / jid / "segments.json"
+            ws_jid = resolve_job_workspace(jid)
+            seg_f = ws_jid / "segments.json"
             if not seg_f.exists():
-                seg_f = Path("workspace") / jid / "raw_segments.json"
+                seg_f = ws_jid / "raw_segments.json"
             if seg_f.exists():
                 try:
                     from dubstudio.subtitles.ass import generate_ass_subtitles
                     raw_segs = json.loads(seg_f.read_text(encoding="utf-8"))
                     segs = raw_segs.get("segments", []) if isinstance(raw_segs, dict) else raw_segs
-                    sty_f = Path("workspace") / jid / "style.json"
+                    sty_f = ws_jid / "style.json"
                     sty = json.loads(sty_f.read_text(encoding="utf-8")) if sty_f.exists() else {}
-                    gen_ass = Path("workspace") / jid / "subtitles.ass"
+                    gen_ass = ws_jid / "subtitles.ass"
                     generate_ass_subtitles(segs, gen_ass, style=sty, video_width=cur_w, video_height=cur_h)
                     if gen_ass.exists():
                         ass_file = gen_ass
@@ -2384,7 +2404,7 @@ def edit_video_api(req: EditVideoRequest):
                     _api_logger.warning("Could not auto-generate subtitles for %s: %s", jid, e)
 
         if ass_file:
-            temp_sub_dir = Path("workspace/.cache/edit")
+            temp_sub_dir = get_workspace_dir() / ".cache" / "edit"
             temp_sub_dir.mkdir(parents=True, exist_ok=True)
             temp_ass = temp_sub_dir / f"burn_{int(time.time())}.ass"
             temp_ass.write_text(ass_file.read_text(encoding="utf-8"), encoding="utf-8")
@@ -2401,7 +2421,8 @@ def edit_video_api(req: EditVideoRequest):
         jid = v_path.stem.replace("_vi", "")
 
     if jid and v_path.name == "input.mp4":
-        prev_dub = Path("workspace") / jid / "preview_dubbed.mp4"
+        from dubstudio.paths import resolve_job_workspace
+        prev_dub = resolve_job_workspace(jid) / "preview_dubbed.mp4"
         if prev_dub.exists() and prev_dub.stat().st_size > 1000:
             additional_inputs.extend(["-i", str(prev_dub.resolve())])
             dub_idx = len(additional_inputs) // 2
@@ -2410,7 +2431,8 @@ def edit_video_api(req: EditVideoRequest):
     out_name = req.output_name or "edited_video.mp4"
     if not out_name.endswith(".mp4"):
         out_name += ".mp4"
-    out_dir = Path("out")
+    from dubstudio.paths import get_out_dir
+    out_dir = get_out_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / out_name
 
@@ -2475,11 +2497,12 @@ static_dir = Path(__file__).resolve().parent / "static"
 static_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-workspace_dir = Path("workspace")
+from dubstudio.paths import get_workspace_dir, get_out_dir
+workspace_dir = get_workspace_dir()
 workspace_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/media/workspace", StaticFiles(directory=str(workspace_dir)), name="media_workspace")
 
-out_dir = Path("out")
+out_dir = get_out_dir()
 out_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/media/out", StaticFiles(directory=str(out_dir)), name="media_out")
 

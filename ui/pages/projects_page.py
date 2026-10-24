@@ -314,8 +314,9 @@ class ProjectsPage(QWidget):
             return
 
         import time
+        from dubstudio.paths import get_workspace_dir
         base_date = time.strftime("%d%m%Y")
-        ws_dir = Path("workspace")
+        ws_dir = get_workspace_dir()
         candidate = base_date
         idx = 1
         existing_names = set()

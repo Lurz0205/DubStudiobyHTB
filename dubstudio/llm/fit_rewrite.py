@@ -22,7 +22,8 @@ class FitRewriter:
         self.cdp_port = getattr(cfg.translation, "cdp_port", 9222)
         self.api_key = cfg.gemini_api_key or os.getenv("GEMINI_API_KEY")
         self.model = cfg.translation.model or "gemini-2.5-flash"
-        self.cache_dir = cache_dir or Path("workspace/.cache/llm")
+        from dubstudio.paths import get_workspace_dir
+        self.cache_dir = cache_dir or (get_workspace_dir() / ".cache" / "llm")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         base_dir = Path(__file__).parent
         self.prompt_template_path = base_dir / "prompts" / "fit_rewrite.md"
@@ -51,19 +52,20 @@ class FitRewriter:
         # Pass-specific urgency directive
         if pass_idx == 1:
             urgency_hdr = (
-                "## [LƯỢT 1 - CÂN BẰNG THOẠI HAI CHIỀU]:\n"
-                "- Đối với câu direction='shorter': RÚT GỌN ngắn gọn hơn để số ký tự xấp xỉ hoặc dưới target_chars, loại bỏ từ đệm thừa.\n"
-                "- Đối với câu direction='longer': THOÁT Ý diễn đạt đầy đủ và thoáng hơn để câu nói tự nhiên khớp với thời lượng người nói trên hình (target_chars), không dịch cộc lốc nhưng không bịa sự kiện mới."
+                "## [LƯỢT 1 - BIÊN KỊCH LỒNG TIẾNG THOÁT Ý & CÂN BẰNG THỜI LƯỢNG]:\n"
+                "- Đối với câu direction='shorter': DỊCH THOÁT Ý CÔ ĐỌNG, viết lại câu tự nhiên, gãy gọn, độ dài trong khoảng [min_chars, max_chars] (xấp xỉ target_chars). TUYỆT ĐỐI KHÔNG CẮT CỤT LỦN làm mất tự nhiên và KHÔNG ĐƯỢC VIẾT DƯỚI min_chars để tránh bị hở khoảng lặng quá nhiều so với giọng gốc.\n"
+                "- Đối với câu direction='longer': DỊCH THOÁT Ý ĐẦY ĐỦ, thoáng đạt, tự nhiên để lấp đầy thời lượng nói trên hình (đạt khoảng target_chars, trong [min_chars, max_chars]), không bịa sự kiện mới."
             )
         elif pass_idx == 2:
             urgency_hdr = (
-                "## [LƯỢT 2 - YÊU CẦU RÚT GỌN MẠNH HƠN]: Lần trước câu vẫn bị dài và đè âm thanh vào câu sau! "
-                "BẮT BUỘC phải viết ngắn gọn hơn nữa, lược bỏ triệt để từ ngữ rườm rà và từ đệm thừa, giữ số ký tự dưới target_chars!"
+                "## [LƯỢT 2 - TINH GỌN THOÁT Ý CHUẨN XÁC]: Lần trước câu vẫn hơi dài gây đè âm thanh nhẹ vào câu sau! "
+                "Hãy dùng tài năng biên kịch tìm cách diễn đạt khác thoát ý hơn, cô đọng hơn, bám sát target_chars trong dải [min_chars, max_chars]. "
+                "TUYỆT ĐỐI KHÔNG CẮT CỤT CÂU LỦNG CỦNG và KHÔNG ĐƯỢC VIẾT DƯỚI min_chars!"
             )
         else:
             urgency_hdr = (
-                f"## [LƯỢT {pass_idx} - RÚT GỌN TỐI ĐA]: Câu vẫn đang bị đè âm thanh nghiêm trọng! "
-                "BẮT BUỘC phải cô đọng tối đa, viết câu siêu ngắn gọn và súc tích nhất có thể nhưng giữ ý chính!"
+                f"## [LƯỢT {pass_idx} - CÔ ĐỌNG THOÁT Ý TỐI ƯU]: Tối ưu hóa từ ngữ gãy gọn, súc tích nhất theo target_chars, "
+                "câu nói mạch lạc tự nhiên, không cụt lửng, không hở giọng dưới min_chars."
             )
 
         # Prepare payload
@@ -84,7 +86,9 @@ class FitRewriter:
                 "measured_dur": u.get("measured_dur", 0.0),
                 "max_audio_dur": u.get("max_audio_dur", 1.0),
                 "direction": u.get("direction", "shorter"),
+                "min_chars": u.get("min_chars", max(8, int(u.get("target_chars", 25) * 0.85))),
                 "target_chars": u.get("target_chars", 25),
+                "max_chars": u.get("max_chars", max(10, int(u.get("target_chars", 25) * 1.10))),
                 "context": context_str,
             })
 
@@ -193,21 +197,27 @@ class FitRewriter:
 
         # Pass-specific urgency directive
         if pass_idx == 1:
-            urgency_hdr = "## [LƯỢT 1]: Rút gọn các câu có is_colliding: true để số ký tự xấp xỉ hoặc dưới target_chars."
+            urgency_hdr = (
+                "## [LƯỢT 1 - BIÊN KỊCH THOÁT Ý CHÙM CÂU]: Rút gọn các câu có is_colliding: true bằng cách DỊCH THOÁT Ý CÔ ĐỌNG, "
+                "độ dài nằm trong khoảng [min_chars, max_chars] (xấp xỉ target_chars). "
+                "TUYỆT ĐỐI KHÔNG CẮT CỤT LỦNG CỦNG và KHÔNG ĐƯỢC VIẾT DƯỚI min_chars để tránh bị hở khoảng lặng quá nhiều so với giọng gốc."
+            )
         elif pass_idx == 2:
             urgency_hdr = (
-                "## [LƯỢT 2 - YÊU CẦU RÚT GỌN MẠNH HƠN]: Lần trước câu vẫn bị dài và đè âm thanh vào câu sau! "
-                "BẮT BUỘC phải viết ngắn gọn hơn nữa, lược bỏ triệt để từ ngữ rườm rà và từ đệm thừa, giữ số ký tự dưới target_chars!"
+                "## [LƯỢT 2 - TINH GỌN THOÁT Ý CHUẨN XÁC]: Lần trước câu vẫn bị dài và đè âm thanh vào câu sau! "
+                "Hãy dùng tài năng biên kịch tìm cách diễn đạt khác thoát ý hơn, cô đọng hơn theo target_chars, "
+                "TUYỆT ĐỐI KHÔNG VIẾT DƯỚI min_chars và giữ tính tự nhiên, mạch lạc của cả chùm câu!"
             )
         else:
             urgency_hdr = (
-                f"## [LƯỢT {pass_idx} - RÚT GỌN TỐI ĐA]: Câu vẫn đang bị đè âm thanh nghiêm trọng! "
-                "BẮT BUỘC phải cô đọng tối đa, viết câu siêu ngắn gọn và súc tích nhất có thể nhưng giữ ý chính!"
+                f"## [LƯỢT {pass_idx} - CÔ ĐỌNG THOÁT Ý TỐI ƯU]: Tối ưu hóa từ ngữ gãy gọn, súc tích nhất theo target_chars, "
+                "câu nói mạch lạc tự nhiên, không cụt lửng, không hở giọng dưới min_chars."
             )
 
         # Format cluster items
         payload_items = []
         for s in cluster_segments:
+            t_chars = s.get("target_chars", 0)
             payload_items.append({
                 "id": s["id"],
                 "zh": s.get("zh") or s.get("src_text", ""),
@@ -216,7 +226,9 @@ class FitRewriter:
                 "is_colliding": bool(s.get("is_colliding")),
                 "measured_dur": s.get("tts_dur", 0.0),
                 "max_audio_dur": s.get("max_audio_dur", 0.0),
-                "target_chars": s.get("target_chars", 0),
+                "min_chars": s.get("min_chars", max(8, int(t_chars * 0.85)) if t_chars > 0 else 0),
+                "target_chars": t_chars,
+                "max_chars": s.get("max_chars", max(10, int(t_chars * 1.10)) if t_chars > 0 else 0),
             })
 
         cluster_str = json.dumps(payload_items, ensure_ascii=False, indent=2)
