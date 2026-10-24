@@ -1,49 +1,58 @@
 # DubStudio — Trình Lồng Tiếng & Vietsub Video AI (Trung → Việt)
 
-[![Version](https://img.shields.io/badge/Release-v1.1.3%20Official-10b981.svg)](https://github.com/Lurz0205/DubStudiobyHTB/releases)
+[![Version](https://img.shields.io/badge/Release-Official-10b981.svg)](https://github.com/Lurz0205/DubStudiobyHTB/releases)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2011%20%7C%2010%20(64--bit)-38bdf8.svg)](https://github.com/Lurz0205/DubStudiobyHTB/releases)
 [![License](https://img.shields.io/badge/License-MIT-gray.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11-yellow.svg)](https://www.python.org/)
 
 **DubStudio** là ứng dụng desktop Windows mã nguồn mở, hoạt động theo triết lý **cục bộ (Local-first)**, chuyên chuyển đổi tự động các video tiếng Trung (video ngắn, review phim, vlog đời sống, clip công nghệ, hoạt hình...) sang video thuyết minh/lồng tiếng Việt chuẩn ngữ cảnh, tự nhiên kèm phụ đề định dạng nâng cao (ASS).
 
-Toàn bộ các mô hình AI hạng nặng (tách nhạc nền Kim_Vocal_2 / BS-RoFormer, nhận dạng giọng nói SenseVoice-Small / Whisper large-v3-turbo, tổng hợp giọng đọc thuyết minh VieNeu-TTS-v3 Turbo) đều được tối ưu hóa chạy trực tiếp trên GPU máy tính người dùng (NVIDIA RTX 4GB VRAM trở lên), đảm bảo tốc độ vượt trội, bảo mật dữ liệu tuyệt đối và hoàn toàn miễn phí trọn đời.
+Toàn bộ các mô hình AI hạng nặng (tách nhạc nền, nhận dạng tiếng Trung, tổng hợp giọng nói thuyết minh) đều được tối ưu hóa chạy trực tiếp trên card đồ họa máy tính người dùng (NVIDIA RTX 4GB VRAM trở lên), đảm bảo tốc độ xử lý nhanh, bảo mật dữ liệu tuyệt đối và hoàn toàn miễn phí trọn đời.
 
 ---
 
-## 📥 Tải bản cài đặt sẵn cho Windows (Khuyến nghị)
+## 📥 Tải bản cài đặt sẵn cho Windows
 
-Nếu bạn không muốn cài đặt Python hoặc cấu hình môi trường phức tạp:
-👉 **[Tải xuống bản cài đặt mới nhất DubStudio v1.1.3 (DubStudio-win-Setup.exe)](https://github.com/Lurz0205/DubStudiobyHTB/releases/tag/v1.1.3)**
+👉 **[Tải xuống bản cài đặt DubStudio mới nhất (DubStudio-win-Setup.exe)](https://github.com/Lurz0205/DubStudiobyHTB/releases/latest)**
 
-- **Cài đặt trong 10 giây**: Tải về và nhấp đúp file setup để sử dụng ngay.
-- **Tự động cập nhật vi sai (Velopack Delta Update)**: Tự động kiểm tra và nâng cấp phiên bản mới siêu tốc chỉ với vài chục MB mà không cần tải lại toàn bộ app.
-- **Độc lập hoàn toàn**: Tích hợp sẵn FFmpeg GPU nội bộ, tự động quản lý và tải mô hình AI vào thư mục dữ liệu chuẩn `DubStudioData\models`.
+- **Cài đặt trong 1 click**: Tải về và nhấp đúp file setup để sử dụng ngay mà không cần cài đặt Python hay môi trường phức tạp.
+- **Tự động cập nhật siêu tốc (Velopack Delta Update)**: Tự động kiểm tra và nâng cấp phiên bản mới nhanh chóng với các gói cập nhật vi sai dung lượng nhẹ.
+- **Độc lập và tiện lợi**: Đã tích hợp sẵn FFmpeg tăng tốc GPU và cơ chế tự động quản lý mô hình AI.
 
 ---
 
-## 🌟 Điểm nổi bật trên phiên bản v1.1.3
+## 🌟 Tính năng cốt lõi của DubStudio
 
-### 1. Nâng cấp Giọng đọc TTS 200% Chuẩn Phát thanh & Khử Rè Tuyệt đối
-- **Chuẩn hóa chuỗi xử lý 48kHz**: Nâng chất lượng âm thanh lên 48kHz triệt tiêu nhiễu răng cưa của TTS.
-- **Bộ lọc EQ làm ấm & Khử chói**: Lọc bỏ tạp âm trầm dưới 80Hz, tăng cường độ dày ở 180Hz và giảm chói ở 5500Hz giúp giọng đọc ấm áp, tự nhiên.
-- **Upward Compressor + Brickwall Limiter**: Khuếch đại âm lượng lên 200% tăng thực tế +8.4 đến +13.3 LUFS (tai người nghe to gấp đôi thực thụ), True Peak được kiểm soát mềm mại ở `-0.3 dBFS`, **0% clipping (không vỡ hạt rè)**.
+### 1. Tách nhạc nền & Lời thoại AI (Vocal / BGM Separation)
+- Sử dụng mô hình tách âm thanh tiên tiến (Kim_Vocal_2 / BS-RoFormer) để tách hoàn toàn giọng nói tiếng Trung ra khỏi nhạc nền và hiệu ứng âm thanh (SFX).
+- Giữ nguyên vẹn 100% âm thanh môi trường, nhạc phim và tiếng động gốc.
 
-### 2. Đồng bộ Phụ đề WYSIWYG 1:1 Tuyệt đối (Preview sao - Render vậy)
-- **Sai số 0 pixel giữa Preview và Xuất video**: Sử dụng hệ thống đo đạc font `QFontMetrics` đồng bộ cùng hệ số chuẩn `libass` (1.116x).
-- **Hộp nền đen (Background Box) che kín phụ đề gốc**: Hộp nền đen và kích thước chữ trên video thành phẩm khớp 100% với màn hình Preview, che kín hoàn toàn chữ tiếng Trung gốc bên dưới.
+### 2. Nhận dạng tiếng Trung chuẩn xác (Chinese ASR)
+- Hỗ trợ linh hoạt cả **SenseVoice-Small** (siêu tốc, tích hợp VAD phân tách nhịp câu tự nhiên) và **Faster-Whisper large-v3-turbo** (chính xác cao cho video nhiều tạp âm).
+- Tự động phân đoạn lời thoại và lấy mốc thời gian (timestamps) chuẩn xác tới từng mili-giây.
 
-### 3. Cơ chế Rút gọn Lồng tiếng Thoát ý & Chống Hở Câu
-- **Dịch thoát ý khẩu ngữ tự nhiên**: Định hướng AI dịch lại câu ngắn gọn, súc tích, giữ trọn nghĩa phim thay vì cắt gọt máy móc lủng củng.
-- **Sàn ký tự `min_chars` thông minh**: Khóa chặt độ dài tối thiểu, triệt tiêu hoàn toàn khoảng lặng chết ("hở miệng") so với giọng nói video gốc.
+### 3. Dịch thuật theo ngữ cảnh & Nhận diện nhân vật thông minh
+- Tận dụng trí tuệ ngữ cảnh của LLM (Gemini Flash / Web CDP): tự động nhận diện đại từ nhân xưng, vai vế xưng hô (cô, chú, anh, chị, em...) và giới tính nhân vật (nam/nữ) để gán giọng đọc tương ứng.
+- Văn phong dịch thoát ý, tự nhiên, súc tích, đậm chất đời thường của người Việt.
+- Hỗ trợ chế độ **Tự dịch thủ công (Manual Translation)**: Copy lời thoại ra ngoài dịch bằng ChatGPT/Claude/DeepSeek và dán lại trong 1 click.
 
-### 4. Chuẩn hóa Quản lý Thư mục Dữ liệu & Xuất Video
-- **Thư mục xuất chuẩn**: Video thành phẩm mặc định được lưu vào thư mục quen thuộc `Videos\DubStudio` (`C:\Users\<User>\Videos\DubStudio`).
-- **Tương tác thuận tiện**: Tự động mở và bôi sáng (highlight) file video trong Windows Explorer, hỗ trợ nút "Đổi thư mục xuất" trực tiếp trên giao diện.
+### 4. Giọng đọc thuyết minh tiếng Việt tự nhiên (VieNeu-TTS Turbo)
+- Tích hợp mô hình giọng đọc AI tiếng Việt chất lượng cao chạy offline hoàn toàn trên GPU.
+- Hỗ trợ đa dạng giọng đọc nam/nữ nhiều vùng miền, ngữ điệu tự nhiên, truyền cảm.
+- Chuỗi xử lý âm thanh phát thanh chuyên nghiệp: khử ồn trầm, khử chói kim loại, cho phép nâng âm lượng lên 200% uy lực mà không bị vỡ tiếng.
 
-### 5. Quản lý Tài nguyên GPU & Đa kênh mượt mà
-- **Tối ưu VRAM 4GB**: Stage Mutex Kernel tự động giải phóng bộ nhớ giữa các khâu nặng; dọn dẹp sạch tiến trình ngầm qua Windows Job Object.
-- **Multi-track Preview**: Hỗ trợ khoanh vùng giữ âm gốc trực tiếp trên Timeline với chuyển tiếp chống click/pop 150ms.
+### 5. Khớp thời lượng & Nhịp điệu tự động (Audio-Video Fit)
+- Tự động tính toán độ dài lời thoại tiếng Việt so với khoảng thời gian câu gốc trên video.
+- Điều tốc thông minh và áp dụng cơ chế viết lại câu (Smart Fit Rewrite) súc tích, giữ trọn nghĩa phim, không làm câu bị hở nhịp hay kéo dài lấn sang câu sau.
+
+### 6. Studio Preview đa kênh & Biên tập trực quan
+- Trình phát video preview đồng bộ đa kênh: nghe thử và điều chỉnh âm lượng độc lập cho từng rãnh (Tiếng Việt lồng tiếng, Nhạc nền BGM, Âm thanh gốc).
+- **Khoanh vùng Giữ âm gốc (Original Audio Passthrough)**: Dễ dàng kéo chọn trực tiếp trên Timeline các đoạn cần giữ tiếng gốc (tiếng khóc, cười, hát, thét, hiệu ứng đặc biệt) với chuyển tiếp mượt mà.
+
+### 7. Xuất video chất lượng cao & Phụ đề ASS nâng cao
+- Trình tạo phụ đề ASS chuẩn WYSIWYG (khớp 100% giữa màn hình Preview và video xuất ra).
+- Hỗ trợ hộp nền đen (Background Box) bo góc sắc nét, che phủ hoàn toàn phụ đề tiếng Trung gốc bên dưới.
+- Xuất video tận dụng phần cứng GPU (NVIDIA NVENC / Intel QSV) nhanh chóng, giữ trọn độ nét gốc của video.
 
 ---
 
@@ -57,9 +66,9 @@ flowchart LR
     D --> E["3. Phụ đề & Xuất Video\n(ASS Styling + GPU Render)"]
 ```
 
-1. **Bước 1 — Tạo phụ đề:** Chọn video tiếng Trung, chọn văn phong và bấm **"1. Tạo phụ đề"**.
-2. **Bước 2 — Hiệu chỉnh & Tạo lồng tiếng:** Nghe thử, sửa chữ trực tiếp trên bảng, đổi giọng đọc hoặc khoanh vùng âm gốc rồi bấm **"2. Tạo lồng tiếng"**.
-3. **Bước 3 — Xuất video:** Sang tab **"3. Phụ đề"** để chọn phong cách hiển thị chữ và bấm **"Xuất Video"**.
+1. **Bước 1 — Tạo phụ đề:** Nạp video, chọn văn phong mong muốn và nhấn **"1. Tạo phụ đề"**.
+2. **Bước 2 — Hiệu chỉnh & Tạo lồng tiếng:** Nghe thử, tinh chỉnh câu chữ trực tiếp trên bảng, đổi giọng đọc hoặc khoanh vùng giữ âm gốc rồi nhấn **"2. Tạo lồng tiếng"**.
+3. **Bước 3 — Xuất video:** Sang tab **"3. Phụ đề"** để chọn kiểu dáng hiển thị phụ đề và nhấn **"Xuất Video"**.
 
 ---
 
@@ -89,7 +98,7 @@ flowchart LR
 
 ---
 
-## 🚀 Hướng dẫn khởi động từ mã nguồn
+## 🚀 Hướng dẫn khởi động từ mã nguồn (Dành cho lập trình viên)
 
 ### 1. Yêu cầu môi trường
 - Python **3.11** (Lưu ý: Không dùng Python 3.12 hoặc 3.14 do yêu cầu tương thích của PyTorch CUDA và CTranslate2).
@@ -147,4 +156,4 @@ ToolDichThuat/
 - Ứng dụng chỉ phục vụ mục đích biên dịch, học tập và sản xuất video cá nhân từ các tệp tin video nội bộ hợp pháp trên máy tính người dùng.
 
 ---
-*Phát triển bởi đội ngũ DubStudio — Phiên bản v1.1.3 Stable.*
+*DubStudio — Trình lồng tiếng & Vietsub video AI cá nhân.*
