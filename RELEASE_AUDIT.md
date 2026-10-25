@@ -2,7 +2,7 @@
 
 - **Mục tiêu phát hành:** `v1.1.3`
 - **Phiên bản gốc đối chiếu:** `v1.1.2`
-- **Thời gian kiểm toán:** `2026-10-25 09:28:35`
+- **Thời gian kiểm toán:** `2026-10-25 10:09:43`
 - **Tổng số file thay đổi:** `56` (47 sửa đổi, 9 thêm mới, 0 đã xóa)
 
 ---
@@ -43,7 +43,7 @@
 | Trạng thái | Đường dẫn File | SHA cũ (v1.1.2) | SHA mới (HEAD) |
 |:---|:---|:---|:---|
 | **Modified** | `.github/workflows/build_release.yml` | `a42b286` | `f259ebf` |
-| **Modified** | `AGENTS.md` | `62cac09` | `3e0334b` |
+| **Modified** | `AGENTS.md` | `62cac09` | `9912113` |
 | **Modified** | `DubStudio.spec` | `eb97325` | `af5ebbf` |
 | **Modified** | `PROGRESS.md` | `8b98e6d` | `0315cee` |
 | **Modified** | `README.md` | `11132e4` | `44bf192` |
@@ -103,7 +103,7 @@
 
 ## 3. Lịch sử Git Commits Kể từ `v1.1.2`
 
-- **[Bản phát hành này / HEAD]** Release v1.1.3: +20dB Voice Boost, WYSIWYG 9:16 Subtitles, and Unified Export
+- **[Bản phát hành này / HEAD]** Update AGENTS.md: Refine release push protocol and comparison rules
 - [`4b45694`] Release: Patch v1.1.3 - Hot-patch, Safe Relaunch, Fit Optimization & Model Notification
 - [`922184e`] Update GitHub push script to Full-Tree Deterministic Snapshot Sync
 - [`d8b2c43`] Release v1.1.3: Studio audio mastering, 200% volume fix, render fix, and safe updater
@@ -114,3 +114,4 @@
 - [`1baae95`] Update source tree snapshot
 - [`9de861d`] Update README.md
 - [`a977440`] Update source tree snapshot
+- [`b710e1b`] Release v1.1.3: +20dB Voice Boost, WYSIWYG 9:16 Subtitles, and Unified Export
