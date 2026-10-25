@@ -2,33 +2,39 @@
 
 - **Mục tiêu phát hành:** `v1.1.3`
 - **Phiên bản gốc đối chiếu:** `v1.1.2`
-- **Thời gian kiểm toán:** `2026-10-25 09:08:41`
+- **Thời gian kiểm toán:** `2026-10-25 09:28:35`
 - **Tổng số file thay đổi:** `56` (47 sửa đổi, 9 thêm mới, 0 đã xóa)
 
 ---
 
 ## 1. Tổng hợp toàn diện các tính năng & Lỗi đã sửa từ `v1.1.2`
 
-1. **Chuỗi Xử lý Âm thanh Studio Mastering & Sửa lỗi âm lượng 200%:**
-   - Tái cấu trúc chuỗi bộ lọc âm thanh giọng đọc tiếng Việt: lọc rung sub-bass (high-pass 80Hz), tăng cường 2 dải EQ trong trẻo phát âm tiếng Việt (+3dB ở 3.2kHz, +1.5dB ở 120Hz), broadcast compressor.
-   - Đưa bộ tăng âm sau compressor đạt chuẩn âm học +6.01 dBFS ở 200% kèm true-peak alimiter chống vỡ tiếng.
-   - Tích hợp tính năng **Auto-Ducking thông minh (`sidechaincompress`)**: Tự động giảm nhạc nền BGM xuống ~10 dB khi có giọng đọc và trả về êm ái khi dứt câu.
-   - Trình phát video preview điều khiển độc lập 4 luồng âm thanh mượt mà.
+1. **Chuẩn hóa Phóng đại Âm lượng +20.0 dB & Headroom Scaling chuẩn DAW:**
+   - Giữ nguyên vẹn 100% âm lượng gốc TTS khi ở mức 100% (đạt chuẩn 0.0 dB diff).
+   - Mức 200% phóng đại thực tế cực mạnh **+20.0 dB** (gấp 10 lần biên độ sóng ban đầu), kết hợp transparent lookahead soft-limiter tại 0.98 chống clipping và không gây rè/vang.
+   - Cơ chế Headroom Scaling duy nhất (`voice_headroom_200.wav`): Không đổi source URL của file âm thanh khi kéo thanh trượt, điều chỉnh gain phần cứng tức thì, chấm dứt hoàn toàn hiện tượng khựng, giật cục hay mất tiếng.
 
-2. **Khắc phục triệt để lỗi kết xuất video (500 Server Error):**
-   - Sửa lỗi thiếu khai báo `cfg = AppConfig.load()` trong endpoint `/api/jobs/{job_id}/render`, `/split`, `/segments/tts`.
-   - Cấu hình In-Memory ASGI Bridge trả về phản hồi lỗi JSON tiếng Việt rõ ràng, loại bỏ hoàn toàn các chuỗi URL loopback/port khỏi giao diện người dùng.
+2. **Studio Vocal Enhancement & Auto-Ducking thông minh:**
+   - Chuỗi lọc giọng đọc: High-pass 80Hz cắt rung chấn micro sub-bass; EQ 3.2kHz tăng độ thoát tiếng cho phát âm tiếng Việt; EQ 350Hz làm sạch dải trung trầm bí bách.
+   - Tính năng **Auto-Ducking (`sidechaincompress`)**: Tự động giảm nhạc nền BGM xuống ~10 dB khi có giọng đọc và trả về êm ái khi dứt câu.
 
-3. **Kiến trúc Cập nhật An toàn & Bảo toàn Dữ liệu:**
-   - Tách biệt thư mục cài đặt `%LocalAppData%\DubStudio` và dữ liệu `%LocalAppData%\DubStudioData`.
-   - Cho phép cài đè không bao giờ bị xung đột hoặc mất các mô hình AI đã tải.
-   - Mở khóa cờ `JOB_OBJECT_LIMIT_BREAKAWAY_OK` và khởi động lại độc lập bằng PowerShell wait-for-PID chống lỗi khóa file `WinError 32`.
-   - Xác thực toàn vẹn mã băm SHA-256 và kích thước byte trước khi áp dụng cập nhật.
+3. **Tự động Ngắt nhịp Tách câu theo Số từ Ước lượng:**
+   - Bắt sự kiện thay đổi `Từ/dòng` lưu tức thì vào `job_config.json`.
+   - Tự động kích hoạt cơ chế tách câu ngắt nhịp ngay sau khi tạo phụ đề Bước 1 hoàn tất, loại bỏ thao tác bấm nút tách thủ công của người dùng.
 
-4. **Tối ưu hóa Vòng lặp Khớp Thoại (Fit Stage):**
-   - Cân bằng thời lượng 2 chiều (`shorter` cho câu bị đè, `longer` cho câu quá ngắn) qua 1 lượt gọi LLM duy nhất.
-   - Tận dụng Persistent TTS Warm Worker tổng hợp âm thanh từng câu chỉ mất ~0.4s.
-   - Sửa triệt để lỗi xung đột keyword argument `stdin` trong subprocess Popen.
+4. **Hợp nhất Xuất video vào Tab Chỉnh sửa Video:**
+   - Xóa bỏ nút Xuất video ở Tab Phụ đề, chuyển thành nút điều hướng trực quan sang Tab Chỉnh sửa video.
+   - Tab Chỉnh sửa video hiển thị preview phụ đề 1:1, tự động đặt tên file xuất theo tên dự án `<tên_dự_án>.mp4`, lưu đồng thời vào thư mục xuất và thư mục dự án.
+   - Bổ sung mục chọn 'Thư mục lưu video xuất' trong Cài đặt, chuẩn hóa mặc định về `~/Videos/DubStudio`.
+
+5. **Đồng bộ Tuyệt đối Hệ Tọa độ Phụ đề WYSIWYG & Mở rộng Tỉ lệ Nền (9:16):**
+   - Chuẩn hóa hệ quy chiếu `compute_subtitle_geometry` trên độ phân giải gốc của video (`native_w x native_h`).
+   - Preview và video xuất đồng nhất 100%, hộp nền đen che kín chữ Trung Quốc gốc bên dưới.
+   - Khi bật mở rộng tỉ lệ nền 9:16, phụ đề được đốt lên video gốc trước khi thêm viền đệm pad, giữ chữ nằm gọn trong khung hình gốc, không bao giờ rơi ra ngoài vùng đệm trắng.
+
+6. **Kiến trúc Cập nhật An toàn & Tự động Khóa Mốc So sánh:**
+   - Tách biệt thư mục cài đặt `%LocalAppData%\DubStudio` và dữ liệu `%LocalAppData%\DubStudioData`, bảo toàn 100% các model AI đã tải khi cập nhật bản mới.
+   - Luôn khóa mốc so sánh (audit & delta package) từ bản release chính thức trước đó trên GitHub (`tag_version < CURRENT_VERSION`), đảm bảo Velopack cắt delta chuẩn xác và siêu nhẹ.
 
 ---
 
@@ -41,7 +47,7 @@
 | **Modified** | `DubStudio.spec` | `eb97325` | `af5ebbf` |
 | **Modified** | `PROGRESS.md` | `8b98e6d` | `0315cee` |
 | **Modified** | `README.md` | `11132e4` | `44bf192` |
-| **Modified** | `RELEASE_NOTES.md` | `3437d7f` | `2c9881e` |
+| **Modified** | `RELEASE_NOTES.md` | `3437d7f` | `a5fbc0b` |
 | **Modified** | `config/subtitle_preset.json` | `bfaaf0b` | `49d456c` |
 | **Modified** | `dubstudio/api/app.py` | `678225e` | `1ce3f03` |
 | **Modified** | `dubstudio/components.py` | `f0c242f` | `30eaf30` |
@@ -65,7 +71,7 @@
 | **Modified** | `dubstudio/version.py` | `92ed50d` | `0ed62e0` |
 | **Modified** | `dubstudio/win_job.py` | `c564d6e` | `57b5253` |
 | **Modified** | `scripts/build_app.ps1` | `c211d51` | `00e720a` |
-| **Modified** | `scripts/push_code_to_github.py` | `0b2ed38` | `21dd9f5` |
+| **Modified** | `scripts/push_code_to_github.py` | `0b2ed38` | `808c9cc` |
 | **Modified** | `scripts/sim_user_machine.ps1` | `9898e47` | `3c0c5f1` |
 | **Modified** | `start_app.py` | `2378504` | `8aa6f48` |
 | **Modified** | `tests/test_api.py` | `5ee1602` | `42b9528` |
@@ -84,7 +90,7 @@
 | **Modified** | `ui/widgets/video_player.py` | `28c07a5` | `1c45938` |
 | **Modified** | `ui/workers.py` | `306799a` | `e0b6f2d` |
 | **Added** | `dubstudio/hotpatch.py` | *N/A* | `7788471` |
-| **Added** | `scripts/audit_release_diff.py` | *N/A* | `f4c026f` |
+| **Added** | `scripts/audit_release_diff.py` | *N/A* | `589a763` |
 | **Added** | `tests/test_audio_volume_smooth.py` | *N/A* | `399a9d7` |
 | **Added** | `tests/test_chinese_split_and_stream.py` | *N/A* | `c7ae9f8` |
 | **Added** | `tests/test_hotpatch_and_relaunch.py` | *N/A* | `3906ce9` |
@@ -97,6 +103,7 @@
 
 ## 3. Lịch sử Git Commits Kể từ `v1.1.2`
 
+- **[Bản phát hành này / HEAD]** Release v1.1.3: +20dB Voice Boost, WYSIWYG 9:16 Subtitles, and Unified Export
 - [`4b45694`] Release: Patch v1.1.3 - Hot-patch, Safe Relaunch, Fit Optimization & Model Notification
 - [`922184e`] Update GitHub push script to Full-Tree Deterministic Snapshot Sync
 - [`d8b2c43`] Release v1.1.3: Studio audio mastering, 200% volume fix, render fix, and safe updater
@@ -106,3 +113,4 @@
 - [`1f3b775`] Update source tree snapshot
 - [`1baae95`] Update source tree snapshot
 - [`9de861d`] Update README.md
+- [`a977440`] Update source tree snapshot

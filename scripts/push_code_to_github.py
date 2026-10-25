@@ -29,17 +29,30 @@ headers = {
 session = requests.Session()
 session.headers.update(headers)
 
-# Parse requested tag from CLI arguments
+# Parse requested tag and commit message from CLI arguments
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dubstudio.version import APP_VERSION
 
 requested_tag = None
+custom_msg = None
 for i, arg in enumerate(sys.argv):
     if arg == "--tag" and i + 1 < len(sys.argv):
         requested_tag = sys.argv[i + 1]
     elif arg.startswith("--tag="):
         requested_tag = arg.split("=", 1)[1]
+    elif arg == "--msg" and i + 1 < len(sys.argv):
+        custom_msg = sys.argv[i + 1]
+    elif arg.startswith("--msg="):
+        custom_msg = arg.split("=", 1)[1]
+
+if custom_msg:
+    commit_msg = custom_msg
+elif requested_tag:
+    tag_clean = requested_tag if requested_tag.startswith("v") else f"v{requested_tag}"
+    commit_msg = f"Release {tag_clean}: +20dB Voice Boost, WYSIWYG 9:16 Subtitles, and Unified Export"
+else:
+    commit_msg = f"Update DubStudio v{APP_VERSION}: Voice volume +20dB boost and UI improvements"
 
 # 0a. Pre-Release Cleanup on Remote:
 # ONLY if a new release tag is requested (--tag vX.X.X):
@@ -68,7 +81,7 @@ if requested_tag:
 # 0b. Mandatory Pre-Push Audit: Compare against last official release (< CURRENT_VERSION)
 try:
     from scripts.audit_release_diff import run_audit
-    run_audit()
+    run_audit(pending_commit_msg=commit_msg)
 except Exception as e:
     print(f"Warning: Pre-push audit encountered error: {e}", flush=True)
 
@@ -216,14 +229,7 @@ if new_tree_sha == base_tree_sha:
     print(f"\n[HOAN TOAN DONG BO] 100% Cay thu muc GitHub va Local hoan toan trung khop (Tree: {new_tree_sha[:7]}). Khong can tao commit moi.", flush=True)
     new_commit_sha = parent_commit_sha
 else:
-    import sys
-    commit_msg = "Update source tree snapshot"
-    for i, arg in enumerate(sys.argv):
-        if arg == "--msg" and i + 1 < len(sys.argv):
-            commit_msg = sys.argv[i + 1]
-        elif arg.startswith("--msg="):
-            commit_msg = arg.split("=", 1)[1]
-
+    print(f"Commit message: {commit_msg}", flush=True)
     commit_payload = {
         "message": commit_msg,
         "tree": new_tree_sha,
