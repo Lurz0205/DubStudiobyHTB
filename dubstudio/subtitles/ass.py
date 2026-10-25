@@ -1,4 +1,5 @@
 """Advanced SubStation Alpha (.ass) subtitle generator supporting Vietnamese typography."""
+from dataclasses import dataclass
 import math
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -356,6 +357,141 @@ def measure_text_box(
         return max(40, w), max(20, h)
 
 
+@dataclass
+class SubtitleGeometry:
+    box_left: int
+    box_top: int
+    box_w: int
+    box_h: int
+    font_size: int
+    pad_x: int
+    pad_y: int
+    box_radius: int
+    cx: int
+    cy: int
+    tx: int
+    wrapped_text: str
+    box_mode: str
+    has_box: bool
+    box_color: str
+    box_opacity: float
+    text_color: str
+    outline_color: str
+    outline_width: int
+    text_align: str
+    video_w: int
+    video_h: int
+
+
+def compute_subtitle_geometry(
+    text: str,
+    style: Optional[Dict[str, Any]] = None,
+    video_w: int = 1280,
+    video_h: int = 720,
+) -> SubtitleGeometry:
+    """
+    Canonical Subtitle Geometry Engine.
+    Computes exact subtitle box, font size, padding, and text coordinates strictly
+    in native video pixel space (video_w x video_h).
+    Ensures 100% pixel-perfect consistency between Preview (any panel size / aspect ratio) and final Render.
+    """
+    style = style or {}
+    video_w = max(int(video_w or 1280), 100)
+    video_h = max(int(video_h or 720), 100)
+
+    font_name = style.get("font_name", "Arial") or "Arial"
+    font_size_val = float(style.get("font_size", 24) or 24)
+    outline_width_val = float(style.get("outline_width", 2) if style.get("outline_width") is not None else 2)
+    margin_v_val = float(style.get("margin_v", 35) or 35)
+    box_width_pct = float(style.get("box_width_pct", 85.0) or 85.0)
+    box_mode = style.get("box_mode", "full_width") or "full_width"
+    has_box = bool(style.get("has_box", True))
+    box_opacity = float(style.get("box_opacity", 0.6) if style.get("box_opacity") is not None else 0.6)
+    box_radius_val = float(style.get("box_radius", 6) if style.get("box_radius") is not None else 6)
+    raw_box_color = style.get("box_color", "#000000") or "#000000"
+    pos = style.get("position", "bottom") or "bottom"
+    align_mode = style.get("text_align", "center") or "center"
+
+    primary_color = style.get("primary_color", "#FFFFFF") or "#FFFFFF"
+    outline_color = style.get("outline_color", "#000000") or "#000000"
+
+    # Base typography scale against reference 720p height so Fontsize in ASS matches preview 1:1
+    scale_v = max(video_h, 360) / 720.0
+    ass_font_size = max(12, int(round(font_size_val * scale_v)))
+    ass_outline_width = max(0, int(round(outline_width_val * scale_v)))
+    ass_margin_v = max(2, int(round(margin_v_val * scale_v)))
+    ass_box_radius = max(0, int(round(box_radius_val * scale_v)))
+
+    box_pad_x = float(style.get("box_padding_x", 14) if style.get("box_padding_x") is not None else 14)
+    box_pad_y = float(style.get("box_padding_y", 8) if style.get("box_padding_y") is not None else 8)
+    ass_pad_x = max(4, int(round(box_pad_x * scale_v)))
+    ass_pad_y = max(2, int(round(box_pad_y * scale_v)))
+
+    # Balance word wrap based on native box width
+    box_w_ref = video_w * (box_width_pct / 100.0)
+    approx_char_width = max(8.0, ass_font_size * 0.58)
+    max_chars_per_line = max(12, int((box_w_ref - ass_font_size) / approx_char_width))
+    wrapped_text = wrap_balanced_lines(text or "", max_chars_per_line=max_chars_per_line)
+
+    box_w, box_h = measure_text_box(
+        text=wrapped_text,
+        font_name=font_name,
+        font_px=ass_font_size,
+        pad_x=ass_pad_x,
+        pad_y=ass_pad_y,
+        box_mode=box_mode,
+        box_width_pct=box_width_pct,
+        video_width=video_w,
+        text_align=align_mode,
+    )
+
+    box_left = int(round((video_w - box_w) / 2.0))
+    if style.get("pos_y_pct") is not None:
+        pct = float(style["pos_y_pct"])
+        box_top = max(0, min(video_h - box_h, int(round(video_h * (pct / 100.0)))))
+    elif pos == "top":
+        box_top = ass_margin_v
+    elif pos == "center":
+        box_top = int(round((video_h - box_h) / 2.0))
+    else:  # "bottom"
+        box_top = int(round(video_h - ass_margin_v - box_h))
+
+    cx = int(round(box_left + box_w / 2.0))
+    cy = int(round(box_top + box_h / 2.0))
+
+    if align_mode == "left":
+        tx = int(round(box_left + ass_pad_x))
+    elif align_mode == "right":
+        tx = int(round(box_left + box_w - ass_pad_x))
+    else:
+        tx = cx
+
+    return SubtitleGeometry(
+        box_left=box_left,
+        box_top=box_top,
+        box_w=box_w,
+        box_h=box_h,
+        font_size=ass_font_size,
+        pad_x=ass_pad_x,
+        pad_y=ass_pad_y,
+        box_radius=ass_box_radius,
+        cx=cx,
+        cy=cy,
+        tx=tx,
+        wrapped_text=wrapped_text,
+        box_mode=box_mode,
+        has_box=has_box,
+        box_color=raw_box_color,
+        box_opacity=box_opacity,
+        text_color=primary_color,
+        outline_color=outline_color,
+        outline_width=ass_outline_width,
+        text_align=align_mode,
+        video_w=video_w,
+        video_h=video_h,
+    )
+
+
 def generate_ass_subtitles(
     segments_or_units: List[Dict[str, Any]],
     output_path: Path,
@@ -478,56 +614,28 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         sl_text = sl.get("text", "")
         start_str = format_ass_time(sl_start)
         end_str = format_ass_time(sl_end)
-        wrapped_text = wrap_balanced_lines(sl_text, max_chars_per_line=max_chars_per_line)
 
-        # Measure 1:1 box width and height matching Preview
-        box_w, box_h = measure_text_box(
-            text=wrapped_text,
-            font_name=font_name,
-            font_px=ass_font_size,
-            pad_x=ass_pad_x,
-            pad_y=ass_pad_y,
-            box_mode=box_mode,
-            box_width_pct=box_width_pct,
-            video_width=video_width,
-            text_align=align_mode,
-        )
+        geo = compute_subtitle_geometry(sl_text, style=style, video_w=video_width, video_h=video_height)
 
-        box_left = int(round((video_width - box_w) / 2.0))
-        if style and style.get("pos_y_pct") is not None:
-            pct = float(style["pos_y_pct"])
-            box_top = max(0, min(video_height - box_h, int(round(video_height * (pct / 100.0)))))
-        elif pos == "top":
-            box_top = ass_margin_v
-        elif pos == "center":
-            box_top = int(round((video_height - box_h) / 2.0))
-        else:  # "bottom"
-            box_top = int(round(video_height - ass_margin_v - box_h))
+        if geo.text_align == "left":
+            text_override = f"{{\\pos({geo.tx},{geo.cy})\\an4\\b1}}"
+        elif geo.text_align == "right":
+            text_override = f"{{\\pos({geo.tx},{geo.cy})\\an6\\b1}}"
+        else:
+            text_override = f"{{\\pos({geo.cx},{geo.cy})\\an5\\b1}}"
 
-        cx = int(round(box_left + box_w / 2.0))
-        cy = int(round(box_top + box_h / 2.0))
-
-        if align_mode == "left":
-            tx = int(round(box_left + ass_pad_x))
-            text_override = f"{{\\pos({tx},{cy})\\an4\\b1}}"
-        elif align_mode == "right":
-            tx = int(round(box_left + box_w - ass_pad_x))
-            text_override = f"{{\\pos({tx},{cy})\\an6\\b1}}"
-        else:  # "center"
-            text_override = f"{{\\pos({cx},{cy})\\an5\\b1}}"
-
-        if has_box:
-            path = make_rounded_box_path(box_w, box_h, ass_box_radius)
+        if geo.has_box:
+            path = make_rounded_box_path(geo.box_w, geo.box_h, geo.box_radius)
             bg_line = (
                 f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,"
-                f"{{\\pos({box_left},{box_top})\\an7\\bord0\\shad0\\1c{box_color_tag}\\1a{alpha_hex}\\p1}}"
+                f"{{\\pos({geo.box_left},{geo.box_top})\\an7\\bord0\\shad0\\1c{box_color_tag}\\1a{alpha_hex}\\p1}}"
                 f"{path}{{\\p0}}"
             )
             events.append(bg_line)
-            text_line = f"Dialogue: 1,{start_str},{end_str},Default,,0,0,0,,{text_override}{wrapped_text}"
+            text_line = f"Dialogue: 1,{start_str},{end_str},Default,,0,0,0,,{text_override}{geo.wrapped_text}"
             events.append(text_line)
         else:
-            text_line = f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{text_override}{wrapped_text}"
+            text_line = f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{text_override}{geo.wrapped_text}"
             events.append(text_line)
 
     full_content = header + "\n".join(events) + "\n"

@@ -40,7 +40,7 @@ from ui.theme import COLORS
 from ui.widgets.bento_card import BentoCard
 from ui.widgets.switch import SwitchToggle
 from ui.widgets.video_player import VideoPlayerWidget
-from ui.workers import ListJobsWorker, LoadJobWorker, RenderVideoWorker, StopTTSWorker
+from ui.workers import ListJobsWorker, LoadJobWorker, StopTTSWorker
 
 
 VIETNAMESE_FONTS = [
@@ -87,7 +87,7 @@ class SubtitleExportPage(QWidget):
     """Page 3: Detailed subtitle styling, live preview, and final video rendering."""
 
     open_folder_requested = pyqtSignal(str)
-    goto_merge_requested = pyqtSignal(str, str)
+    goto_merge_requested = pyqtSignal(str, str, dict, list)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -151,30 +151,12 @@ class SubtitleExportPage(QWidget):
 
         top_bar.addStretch(1)
 
-        # Status & Progress indicator
-        self._progress_bar = QProgressBar()
-        self._progress_bar.setVisible(False)
-        self._progress_bar.setFixedWidth(140)
-        self._progress_bar.setFixedHeight(4)
-        top_bar.addWidget(self._progress_bar)
-
-        self._lbl_status = QLabel("")
-        self._lbl_status.setObjectName("status_label")
-        top_bar.addWidget(self._lbl_status)
-
-        # Action Buttons
-        self._btn_render = QPushButton("  Xuất video")
-        self._btn_render.setIcon(get_icon("film", "#ffffff", "#ffffff", 13))
-        self._btn_render.setObjectName("primary")
-        self._btn_render.setFixedHeight(30)
-        self._btn_render.setToolTip("Khắc phụ đề và xuất video hoàn thiện trực tiếp tại đây")
-        self._btn_render.clicked.connect(self._start_render)
-        top_bar.addWidget(self._btn_render)
-
-        self._btn_goto_merge = QPushButton("  Chỉnh sửa video ➔")
-        self._btn_goto_merge.setIcon(get_icon("scissors", "#9ca3af", "#38bdf8", 13))
-        self._btn_goto_merge.setFixedHeight(30)
-        self._btn_goto_merge.setToolTip("Chuyển sang Tab Chỉnh sửa video (Crop, Canvas 9:16, Khối che, Logo)")
+        # Action Button: Navigate to Video Edit & Export
+        self._btn_goto_merge = QPushButton("  Chỉnh sửa & Xuất video ➔")
+        self._btn_goto_merge.setIcon(get_icon("film", "#ffffff", "#ffffff", 14))
+        self._btn_goto_merge.setObjectName("primary")
+        self._btn_goto_merge.setFixedHeight(32)
+        self._btn_goto_merge.setToolTip("Chuyển sang Tab Chỉnh sửa & Xuất video để xem thử, căn chỉnh hoặc xuất video thành phẩm")
         self._btn_goto_merge.clicked.connect(self._on_goto_merge)
         top_bar.addWidget(self._btn_goto_merge)
 
@@ -383,8 +365,8 @@ class SubtitleExportPage(QWidget):
         card_style.add_layout(grid_pos)
         right_layout.addWidget(card_style)
 
-        # ── Bento Card 2: 4-Track Audio Volume & Export Folder ──
-        card_audio = BentoCard("Hòa âm & Xuất bản", "sliders")
+        # ── Bento Card 2: 4-Track Audio Volume & Stems ──
+        card_audio = BentoCard("Hòa âm & Âm thanh", "sliders")
 
         grid_audio = QGridLayout()
         grid_audio.setVerticalSpacing(10)
@@ -396,7 +378,7 @@ class SubtitleExportPage(QWidget):
         self._slider_vi_voice.setRange(0, 200)
         self._slider_vi_voice.setValue(100)
         self._slider_vi_voice.valueChanged.connect(self._on_vi_voice_slider_changed)
-        self._slider_vi_voice.sliderReleased.connect(self._apply_vi_boost)
+        self._slider_vi_voice.sliderReleased.connect(self._save_style_to_job)
         h_vi.addWidget(self._slider_vi_voice, 1)
 
         self._lbl_vi_voice_val = QLabel("100%")
@@ -408,9 +390,10 @@ class SubtitleExportPage(QWidget):
         grid_audio.addWidget(QLabel("Nhạc nền:"), 1, 0)
         h_bgm = QHBoxLayout()
         self._slider_orig_bgm = QSlider(Qt.Orientation.Horizontal)
-        self._slider_orig_bgm.setRange(0, 200)
+        self._slider_orig_bgm.setRange(0, 100)
         self._slider_orig_bgm.setValue(80)
         self._slider_orig_bgm.valueChanged.connect(self._on_orig_bgm_slider_changed)
+        self._slider_orig_bgm.sliderReleased.connect(self._save_style_to_job)
         h_bgm.addWidget(self._slider_orig_bgm, 1)
 
         self._lbl_orig_bgm_val = QLabel("80%")
@@ -444,10 +427,11 @@ class SubtitleExportPage(QWidget):
         grid_audio.addWidget(self._lbl_custom_bgm_vol_title, 3, 0)
         h_custom_bgm_vol = QHBoxLayout()
         self._slider_custom_bgm = QSlider(Qt.Orientation.Horizontal)
-        self._slider_custom_bgm.setRange(0, 200)
+        self._slider_custom_bgm.setRange(0, 100)
         self._slider_custom_bgm.setValue(50)
         self._slider_custom_bgm.setEnabled(False)
         self._slider_custom_bgm.valueChanged.connect(self._on_custom_bgm_slider_changed)
+        self._slider_custom_bgm.sliderReleased.connect(self._save_style_to_job)
         h_custom_bgm_vol.addWidget(self._slider_custom_bgm, 1)
 
         self._lbl_custom_bgm_val = QLabel("50%")
@@ -465,10 +449,11 @@ class SubtitleExportPage(QWidget):
         grid_audio.addWidget(self._lbl_orig_voice_title, 5, 0)
         h_orig = QHBoxLayout()
         self._slider_orig_voice = QSlider(Qt.Orientation.Horizontal)
-        self._slider_orig_voice.setRange(0, 200)
+        self._slider_orig_voice.setRange(0, 100)
         self._slider_orig_voice.setValue(0)
         self._slider_orig_voice.setEnabled(False)
         self._slider_orig_voice.valueChanged.connect(self._on_orig_voice_slider_changed)
+        self._slider_orig_voice.sliderReleased.connect(self._save_style_to_job)
         h_orig.addWidget(self._slider_orig_voice, 1)
 
         self._lbl_orig_voice_val = QLabel("0%")
@@ -478,30 +463,6 @@ class SubtitleExportPage(QWidget):
         grid_audio.addLayout(h_orig, 5, 1)
 
         card_audio.add_layout(grid_audio)
-
-        card_audio.add_divider()
-
-        # Output Folder row
-        from dubstudio.paths import get_out_dir
-        curr_out = get_out_dir()
-        h_out_row = QHBoxLayout()
-        self._lbl_out_path = QLabel(f"📁 {curr_out.name}/")
-        self._lbl_out_path.setToolTip(str(curr_out))
-        self._lbl_out_path.setStyleSheet("color: #94a3b8; font-size: 11px;")
-        h_out_row.addWidget(self._lbl_out_path, 1)
-
-        btn_change_out = QPushButton(" Đổi thư mục")
-        btn_change_out.setIcon(get_icon("edit", "#9ca3af", "#f0f2f5", 13))
-        btn_change_out.clicked.connect(self._change_output_folder)
-        h_out_row.addWidget(btn_change_out)
-
-        btn_open_out = QPushButton(" Mở thư mục")
-        btn_open_out.setIcon(get_icon("folder", "#9ca3af", "#f0f2f5", 14))
-        btn_open_out.clicked.connect(lambda: self._open_output_folder())
-        h_out_row.addWidget(btn_open_out)
-
-        card_audio.add_layout(h_out_row)
-
         right_layout.addWidget(card_audio)
 
         right_layout.addStretch(1)
@@ -800,15 +761,22 @@ class SubtitleExportPage(QWidget):
         if hasattr(self, "_video_player") and self._video_player:
             self._video_player.set_overlay_preview_visible(self._preview_sub_visible)
 
+    def _schedule_save_style(self):
+        """Debounce saving style and volume settings to disk to avoid I/O flooding during slider drag."""
+        if not hasattr(self, "_save_style_timer"):
+            from PyQt6.QtCore import QTimer
+            self._save_style_timer = QTimer(self)
+            self._save_style_timer.setSingleShot(True)
+            self._save_style_timer.timeout.connect(self._save_style_to_job)
+        self._save_style_timer.start(350)
+
     def _on_vi_voice_slider_changed(self, val: int):
         self._lbl_vi_voice_val.setText(f"{val}%")
         vol = val / 100.0
         self._style["vi_voice_volume"] = vol
         if hasattr(self, "_video_player") and self._video_player:
-            if not getattr(self._video_player, "_multi_track_active", False) and self._current_job_id:
-                self._sync_audio_tracks_to_player(is_rendered_video=False)
             self._video_player.set_vi_voice_volume(vol)
-        self._save_style_to_job()
+        self._schedule_save_style()
 
     def _apply_vi_boost(self):
         if hasattr(self, "_slider_vi_voice") and hasattr(self, "_video_player") and self._video_player:
@@ -820,10 +788,8 @@ class SubtitleExportPage(QWidget):
         self._style["orig_bgm_volume"] = vol
         self._style["bgm_volume"] = vol
         if hasattr(self, "_video_player") and self._video_player:
-            if not getattr(self._video_player, "_multi_track_active", False) and self._current_job_id:
-                self._sync_audio_tracks_to_player(is_rendered_video=False)
             self._video_player.set_orig_bgm_volume(vol)
-        self._save_style_to_job()
+        self._schedule_save_style()
 
     def _pick_custom_bgm(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -862,10 +828,8 @@ class SubtitleExportPage(QWidget):
         vol = val / 100.0
         self._style["custom_bgm_volume"] = vol
         if hasattr(self, "_video_player") and self._video_player:
-            if not getattr(self._video_player, "_multi_track_active", False) and self._current_job_id:
-                self._sync_audio_tracks_to_player(is_rendered_video=False)
             self._video_player.set_custom_bgm_volume(vol)
-        self._save_style_to_job()
+        self._schedule_save_style()
 
     def _on_orig_voice_toggled(self, state: int):
         checked = self._chk_orig_voice.isChecked()
@@ -885,10 +849,8 @@ class SubtitleExportPage(QWidget):
         vol = val / 100.0
         self._style["orig_voice_volume"] = vol
         if hasattr(self, "_video_player") and self._video_player:
-            if not getattr(self._video_player, "_multi_track_active", False) and self._current_job_id:
-                self._sync_audio_tracks_to_player(is_rendered_video=False)
             self._video_player.set_orig_voice_volume(vol, self._chk_orig_voice.isChecked())
-        self._save_style_to_job()
+        self._schedule_save_style()
 
     def _on_box_mode_radio_toggled(self):
         if hasattr(self, "_radio_box_wrap") and self._radio_box_wrap.isChecked():
@@ -1166,151 +1128,10 @@ class SubtitleExportPage(QWidget):
         elif in_mp4.exists():
             target_vid = str(in_mp4.resolve())
 
-        self.goto_merge_requested.emit(target_vid, self._current_job_id)
-
-    def _start_render(self):
-        if not self._current_job_id:
-            QMessageBox.warning(self, "Chưa chọn tác vụ", "Vui lòng chọn một tác vụ để xuất video!")
-            return
-
-        # Check if any segments are missing TTS audio and confirm with user
-        from dubstudio.paths import resolve_job_workspace
-        ws_dir = resolve_job_workspace(self._current_job_id)
-        seg_file = ws_dir / "segments.json"
-        if seg_file.exists():
-            try:
-                segs = json.loads(seg_file.read_text(encoding="utf-8")).get("segments", [])
-                missing_tts_ids = []
-                for s in segs:
-                    sid = s.get("id")
-                    if sid is None:
-                        continue
-                    if s.get("mute_tts") or s.get("keep_original"):
-                        continue
-                    # Check candidate locations
-                    w_file = ws_dir / f"tts/{sid:04d}.wav"
-                    w_stretched = ws_dir / f"tts_stretched/{sid:04d}.wav"
-                    w_custom = ws_dir / str(s.get("tts_file", "")) if s.get("tts_file") else None
-
-                    has_audio = (
-                        (w_file.exists() and w_file.stat().st_size > 500) or
-                        (w_stretched.exists() and w_stretched.stat().st_size > 500) or
-                        (w_custom and w_custom.exists() and w_custom.stat().st_size > 500)
-                    )
-                    if not has_audio:
-                        missing_tts_ids.append(str(sid))
-                if missing_tts_ids:
-                    msg = (
-                        f"Phát hiện các lời thoại số: {', '.join(missing_tts_ids)} chưa được tạo âm thanh lồng tiếng (TTS).\n\n"
-                        f"Phụ đề vẫn sẽ xuất hiện đầy đủ trên video nhưng không có âm thanh lồng tiếng cho các câu này.\n\n"
-                        f"Bạn có muốn tiếp tục xuất video không?"
-                    )
-                    reply = QMessageBox.question(
-                        self,
-                        "Cảnh báo lời thoại chưa có TTS",
-                        msg,
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                        QMessageBox.StandardButton.No,
-                    )
-                    if reply != QMessageBox.StandardButton.Yes:
-                        return
-            except Exception:
-                pass
-
-        # Ensure latest style is saved
-        self._save_style_to_job()
-
-        # Invalidate old render stage and mix stage in state.json so it always re-mixes & re-renders with new style/audio
+        from dubstudio.jobstate import atomic_write_json
         try:
-            ws_state = ws_dir / "state.json"
-            if ws_state.exists():
-                st_data = json.loads(ws_state.read_text(encoding="utf-8"))
-                if "stages" in st_data:
-                    st_data["stages"].pop("render", None)
-                    st_data["stages"].pop("mix", None)
-                    ws_state.write_text(json.dumps(st_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            atomic_write_json(ws_dir / 'style.json', self._style, indent=2)
         except Exception:
             pass
 
-        # Unload video player so ffmpeg can overwrite the output video without Windows lock
-        self._video_player.unload()
-
-        self._btn_render.setEnabled(False)
-        self._progress_bar.setVisible(True)
-        self._progress_bar.setRange(0, 0)  # indeterminate pulse
-        self._lbl_status.setText("Đang kết xuất video và khắc phụ đề ASS...")
-
-        w = RenderVideoWorker(self._current_job_id)
-
-        def _on_done(res: dict):
-            self._btn_render.setEnabled(True)
-            self._progress_bar.setVisible(False)
-            self._lbl_status.setText("✓ Xuất video hoàn tất thành công!")
-
-            # Terminate TTS worker process to free all RAM & VRAM
-            w_stop = StopTTSWorker()
-            self._workers.append(w_stop)
-            w_stop.start()
-
-            # Automatically hide sample subtitle overlay after render finishes
-            self._preview_sub_visible = False
-            self._btn_toggle_preview_sub.setText("  Hiện phụ đề mẫu")
-            if hasattr(self, "_video_player") and self._video_player:
-                self._video_player.set_overlay_preview_visible(False)
-
-            vid_path = res.get("video_path")
-            from dubstudio.paths import get_out_dir, open_in_file_manager
-            target_p = Path(vid_path).resolve() if vid_path else (get_out_dir() / res.get("filename", ""))
-
-            if vid_path and Path(vid_path).exists():
-                self._video_player.load_video(vid_path)
-
-            msg = QMessageBox(self)
-            msg.setWindowTitle("Xuất video thành công")
-            msg.setText(
-                f"Đã xuất thành công video có phụ đề và lồng tiếng:\n\n"
-                f"📹 Tập tin: {res.get('filename')}\n"
-                f"📂 Thư mục: {target_p.parent}"
-            )
-            btn_play = msg.addButton("Xem video ngay", QMessageBox.ButtonRole.AcceptRole)
-            btn_folder = msg.addButton("Mở thư mục video", QMessageBox.ButtonRole.ActionRole)
-            msg.addButton("Đóng", QMessageBox.ButtonRole.RejectRole)
-
-            msg.exec()
-            if msg.clickedButton() == btn_play:
-                if target_p.exists():
-                    open_in_file_manager(target_p)
-                elif hasattr(self, "_video_player") and self._video_player:
-                    self._video_player.play()
-            elif msg.clickedButton() == btn_folder:
-                self._open_output_folder(target_p)
-
-        def _on_err(err: str):
-            self._btn_render.setEnabled(True)
-            self._progress_bar.setVisible(False)
-            self._lbl_status.setText("Lỗi xuất video")
-            QMessageBox.critical(self, "Lỗi xuất video", f"Không thể xuất video: {err}")
-
-        w.finished.connect(_on_done)
-        w.error.connect(_on_err)
-        self._workers.append(w)
-        w.start()
-
-    def _change_output_folder(self):
-        """Allow user to select custom export directory and persist."""
-        from dubstudio.paths import get_out_dir
-        new_dir = QFileDialog.getExistingDirectory(self, "Chọn thư mục lưu video xuất", str(get_out_dir()))
-        if new_dir:
-            os.environ["DUBSTUDIO_OUT_DIR"] = new_dir
-            p = Path(new_dir).resolve()
-            self._lbl_out_path.setText(f"📁 .../{p.name}")
-            self._lbl_out_path.setToolTip(str(p))
-
-    def _open_output_folder(self, target_file: Optional[Path | str] = None):
-        """Open file manager at the output directory, highlighting target file if provided."""
-        from dubstudio.paths import get_out_dir, open_in_file_manager
-        out_dir = get_out_dir()
-        target = Path(target_file).resolve() if target_file else out_dir
-        if not target.exists():
-            target = out_dir
-        open_in_file_manager(target)
+        self.goto_merge_requested.emit(target_vid, self._current_job_id, dict(self._style), list(self._segments))

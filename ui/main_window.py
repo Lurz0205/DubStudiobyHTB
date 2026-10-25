@@ -308,7 +308,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_export_page"):
             self._export_page.set_active_job(job_id)
 
-    def _open_merge_for_video(self, video_path: str, job_id: str = ""):
+    def _open_merge_for_video(self, video_path: str, job_id: str = "", style: dict = None, segments: list = None):
         """Open Final Video Export (Merge) page and load specific video and job."""
         if hasattr(self, "_export_page") and hasattr(self._export_page, "_video_player"):
             try:
@@ -321,7 +321,10 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         if hasattr(self, "_merge_page") and video_path:
-            self._merge_page.load_video_path(video_path, job_id=job_id)
+            if hasattr(self._merge_page, "load_project_data"):
+                self._merge_page.load_project_data(job_id=job_id, video_path=video_path, style=style, segments=segments)
+            else:
+                self._merge_page.load_video_path(video_path, job_id=job_id)
         self._btn_merge.setChecked(True)
         self._on_nav_clicked(3)
 

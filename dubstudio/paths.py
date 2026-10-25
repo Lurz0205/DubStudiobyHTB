@@ -396,8 +396,14 @@ def get_workspace_dir() -> Path:
 
 def get_out_dir() -> Path:
     """Return exported media directory."""
-    if os.environ.get("DUBSTUDIO_OUT_DIR"):
-        d = Path(os.environ["DUBSTUDIO_OUT_DIR"])
+    out_env = os.environ.get("DUBSTUDIO_OUT_DIR", "").strip()
+    if out_env:
+        # Discard stale pytest temp directories if app is running normally
+        if "pytest" in out_env.lower() and not any("pytest" in str(arg).lower() for arg in sys.argv):
+            out_env = ""
+
+    if out_env:
+        d = Path(out_env)
         _mkdir_retry(d)
         return d.resolve()
 

@@ -9,6 +9,7 @@ from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PyQt6.QtWidgets import (
     QComboBox,
+    QFileDialog,
     QFrame,
     QGroupBox,
     QHBoxLayout,
@@ -277,7 +278,39 @@ class SettingsPage(QWidget):
 
         layout.addWidget(sep_box)
 
-        # 4. AI Models & Data Package Manager Box
+        # 4. Output Directory Box
+        out_box = QGroupBox("Thư mục lưu video xuất (Đường dẫn video đầu ra)")
+        out_form = QVBoxLayout(out_box)
+        out_form.setSpacing(10)
+
+        lbl_out_desc = QLabel("Đường dẫn mặc định để lưu video sau khi hoàn tất chỉnh sửa và xuất:")
+        lbl_out_desc.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 11.5px;")
+        out_form.addWidget(lbl_out_desc)
+
+        h_out = QHBoxLayout()
+        self._txt_out_dir = QLineEdit()
+        self._txt_out_dir.setFixedHeight(30)
+        self._txt_out_dir.setPlaceholderText("Đường dẫn thư mục lưu video xuất...")
+        from dubstudio.paths import get_out_dir
+        self._txt_out_dir.setText(str(get_out_dir()))
+        h_out.addWidget(self._txt_out_dir, 1)
+
+        btn_browse_out = QPushButton(" Chọn thư mục...")
+        btn_browse_out.setIcon(get_icon("folder", "#9ca3af", "#f0f2f5", 13))
+        btn_browse_out.setFixedHeight(30)
+        btn_browse_out.clicked.connect(self._on_browse_out_dir)
+        h_out.addWidget(btn_browse_out)
+
+        btn_open_out = QPushButton(" Mở thư mục")
+        btn_open_out.setIcon(get_icon("folder", "#38bdf8", "#38bdf8", 13))
+        btn_open_out.setFixedHeight(30)
+        btn_open_out.clicked.connect(self._on_open_out_dir)
+        h_out.addWidget(btn_open_out)
+
+        out_form.addLayout(h_out)
+        layout.addWidget(out_box)
+
+        # 5. AI Models & Data Package Manager Box
         self._comp_box = QGroupBox("Quản lý Gói mô hình AI & Dữ liệu bổ trợ")
         self._comp_layout = QVBoxLayout(self._comp_box)
         self._comp_layout.setSpacing(12)
@@ -522,6 +555,20 @@ class SettingsPage(QWidget):
         self._workers.append(w)
         w.start()
 
+    def _on_browse_out_dir(self):
+        from dubstudio.paths import get_out_dir
+        curr = self._txt_out_dir.text().strip() or str(get_out_dir())
+        chosen = QFileDialog.getExistingDirectory(self, "Chọn thư mục lưu video xuất", curr)
+        if chosen:
+            chosen_p = Path(chosen).resolve()
+            self._txt_out_dir.setText(str(chosen_p))
+            os.environ["DUBSTUDIO_OUT_DIR"] = str(chosen_p)
+
+    def _on_open_out_dir(self):
+        from dubstudio.paths import open_in_file_manager, get_out_dir
+        p = Path(self._txt_out_dir.text().strip()) if (hasattr(self, "_txt_out_dir") and self._txt_out_dir.text().strip()) else get_out_dir()
+        open_in_file_manager(p)
+
     def load_settings(self):
         w = LoadSettingsWorker()
 
@@ -553,6 +600,10 @@ class SettingsPage(QWidget):
             if idx_sep >= 0:
                 self._combo_sep_model.setCurrentIndex(idx_sep)
 
+            out_dir = data.get("out_dir")
+            if out_dir and hasattr(self, "_txt_out_dir"):
+                self._txt_out_dir.setText(str(out_dir))
+
         self._load_worker = w
         self._workers.append(w)
         w.finished.connect(_on_done)
@@ -569,6 +620,7 @@ class SettingsPage(QWidget):
         selected_provider = "gemini_web" if self._combo_provider.currentIndex() == 0 else "manual"
         selected_asr = self._combo_asr_model.currentData() or "sensevoice-small"
         selected_sep = self._combo_sep_model.currentData() or "Kim_Vocal_2.onnx"
+        out_dir_val = self._txt_out_dir.text().strip() if hasattr(self, "_txt_out_dir") else ""
         payload: dict = {
             "translation_provider": selected_provider,
             "translation_model": "gemini_web" if selected_provider == "gemini_web" else "manual",
@@ -578,6 +630,9 @@ class SettingsPage(QWidget):
             "whisper_model": selected_asr,
             "separation_model": selected_sep,
         }
+        if out_dir_val:
+            payload["out_dir"] = out_dir_val
+            os.environ["DUBSTUDIO_OUT_DIR"] = out_dir_val
 
         w = SaveSettingsWorker(payload)
 

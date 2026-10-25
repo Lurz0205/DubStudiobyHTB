@@ -451,6 +451,7 @@ class SettingsRequest(BaseModel):
     default_female_voice: Optional[str] = None
     whisper_model: Optional[str] = None
     separation_model: Optional[str] = None
+    out_dir: Optional[str] = None
 
 
 class MergeRequest(BaseModel):
@@ -1929,6 +1930,7 @@ def get_settings():
         "default_male_voice": male_voice,
         "default_female_voice": female_voice,
         "available_voices": VIENEU_VOICES,
+        "out_dir": str(get_out_dir()),
     }
 
 
@@ -1964,11 +1966,16 @@ def update_settings(req: SettingsRequest):
         line = _replace_or_keep("DEFAULT_FEMALE_VOICE", req.default_female_voice, line)
         line = _replace_or_keep("WHISPER_MODEL", req.whisper_model, line)
         line = _replace_or_keep("SEPARATION_MODEL", req.separation_model, line)
+        line = _replace_or_keep("DUBSTUDIO_OUT_DIR", req.out_dir, line)
         new_lines.append(line)
 
     if req.separation_model is not None and "SEPARATION_MODEL" not in keys_updated:
         new_lines.append(f"SEPARATION_MODEL={req.separation_model}")
         os.environ["SEPARATION_MODEL"] = req.separation_model
+
+    if req.out_dir is not None and "DUBSTUDIO_OUT_DIR" not in keys_updated:
+        new_lines.append(f"DUBSTUDIO_OUT_DIR={req.out_dir}")
+        os.environ["DUBSTUDIO_OUT_DIR"] = req.out_dir
 
     if req.gemini_api_key is not None and "GEMINI_API_KEY" not in keys_updated:
         new_lines.append(f"GEMINI_API_KEY={req.gemini_api_key}")
@@ -2016,6 +2023,8 @@ def update_settings(req: SettingsRequest):
         os.environ["WHISPER_MODEL"] = req.whisper_model
     if req.separation_model is not None:
         os.environ["SEPARATION_MODEL"] = req.separation_model
+    if req.out_dir is not None:
+        os.environ["DUBSTUDIO_OUT_DIR"] = req.out_dir
 
     # Also update config/default.toml to persist defaults
     cfg_file = Path("config/default.toml")
@@ -2200,7 +2209,63 @@ def edit_video_api(req: EditVideoRequest):
         v_chain = next_chain
         cur_w, cur_h = cw, ch
 
-    # 2. Aspect Ratio / Scale Pad (e.g. 9:16 Shorts/TikTok, 16:9, 1:1, 4:5...)
+    # 2. Vietnamese Subtitles burning (hard-sub directly onto video frame BEFORE aspect ratio pad)
+    if req.subtitles_enabled:
+        from dubstudio.paths import get_workspace_dir, get_out_dir, resolve_job_workspace
+        cand_ass = []
+        if req.subtitles_path and Path(req.subtitles_path).exists():
+            cand_ass.append(Path(req.subtitles_path))
+        if req.job_id:
+            cand_ass.append(resolve_job_workspace(req.job_id) / "subtitles.ass")
+            cand_ass.append(get_out_dir() / f"{req.job_id}_vi.ass")
+        if v_path.parent.exists():
+            cand_ass.append(v_path.parent / "subtitles.ass")
+            cand_ass.append(v_path.parent.parent / "subtitles.ass")
+
+        ass_file = None
+        for p in cand_ass:
+            if p.exists() and p.stat().st_size > 10:
+                ass_file = p
+                break
+
+        jid = req.job_id
+        if not jid:
+            if v_path.parent.parent.name == "workspace":
+                jid = v_path.parent.name
+            elif v_path.parent.name == "out" and "_vi" in v_path.name:
+                jid = v_path.stem.replace("_vi", "")
+
+        if not ass_file and jid:
+            ws_jid = resolve_job_workspace(jid)
+            seg_f = ws_jid / "segments.json"
+            if not seg_f.exists():
+                seg_f = ws_jid / "raw_segments.json"
+            if seg_f.exists():
+                try:
+                    from dubstudio.subtitles.ass import generate_ass_subtitles
+                    raw_segs = json.loads(seg_f.read_text(encoding="utf-8"))
+                    segs = raw_segs.get("segments", []) if isinstance(raw_segs, dict) else raw_segs
+                    sty_f = ws_jid / "style.json"
+                    sty = json.loads(sty_f.read_text(encoding="utf-8")) if sty_f.exists() else {}
+                    gen_ass = ws_jid / "subtitles.ass"
+                    generate_ass_subtitles(segs, gen_ass, style=sty, video_width=cur_w, video_height=cur_h)
+                    if gen_ass.exists():
+                        ass_file = gen_ass
+                except Exception as e:
+                    _api_logger.warning("Could not auto-generate subtitles for %s: %s", jid, e)
+
+        if ass_file:
+            temp_sub_dir = get_workspace_dir() / ".cache" / "edit"
+            temp_sub_dir.mkdir(parents=True, exist_ok=True)
+            temp_ass = temp_sub_dir / f"burn_{int(time.time())}.ass"
+            temp_ass.write_text(ass_file.read_text(encoding="utf-8"), encoding="utf-8")
+            escaped_ass = str(temp_ass.resolve()).replace("\\", "/").replace(":", r"\:")
+            step_idx += 1
+            next_chain = f"[v{step_idx}]"
+            filter_parts.append(f"{v_chain}subtitles='{escaped_ass}'{next_chain}")
+            v_chain = next_chain
+
+    # 3. Aspect Ratio / Scale Pad (e.g. 9:16 Shorts/TikTok, 16:9, 1:1, 4:5...)
     if req.aspect_ratio and req.aspect_ratio.strip().lower() not in ("original", "gốc", "", "none"):
         r_parts = req.aspect_ratio.strip().split(":")
         if len(r_parts) == 2:
@@ -2358,62 +2423,6 @@ def edit_video_api(req: EditVideoRequest):
             filter_parts.append(f"{v_chain}[img_scaled]overlay=x={ix}:y={iy}{next_chain}")
             v_chain = next_chain
 
-    # 5. Vietnamese Subtitles burning (hard-sub from Tab Phụ đề)
-    if req.subtitles_enabled:
-        from dubstudio.paths import get_workspace_dir, get_out_dir, resolve_job_workspace
-        cand_ass = []
-        if req.subtitles_path and Path(req.subtitles_path).exists():
-            cand_ass.append(Path(req.subtitles_path))
-        if req.job_id:
-            cand_ass.append(resolve_job_workspace(req.job_id) / "subtitles.ass")
-            cand_ass.append(get_out_dir() / f"{req.job_id}_vi.ass")
-        if v_path.parent.exists():
-            cand_ass.append(v_path.parent / "subtitles.ass")
-            cand_ass.append(v_path.parent.parent / "subtitles.ass")
-
-        ass_file = None
-        for p in cand_ass:
-            if p.exists() and p.stat().st_size > 10:
-                ass_file = p
-                break
-
-        jid = req.job_id
-        if not jid:
-            if v_path.parent.parent.name == "workspace":
-                jid = v_path.parent.name
-            elif v_path.parent.name == "out" and "_vi" in v_path.name:
-                jid = v_path.stem.replace("_vi", "")
-
-        if not ass_file and jid:
-            ws_jid = resolve_job_workspace(jid)
-            seg_f = ws_jid / "segments.json"
-            if not seg_f.exists():
-                seg_f = ws_jid / "raw_segments.json"
-            if seg_f.exists():
-                try:
-                    from dubstudio.subtitles.ass import generate_ass_subtitles
-                    raw_segs = json.loads(seg_f.read_text(encoding="utf-8"))
-                    segs = raw_segs.get("segments", []) if isinstance(raw_segs, dict) else raw_segs
-                    sty_f = ws_jid / "style.json"
-                    sty = json.loads(sty_f.read_text(encoding="utf-8")) if sty_f.exists() else {}
-                    gen_ass = ws_jid / "subtitles.ass"
-                    generate_ass_subtitles(segs, gen_ass, style=sty, video_width=cur_w, video_height=cur_h)
-                    if gen_ass.exists():
-                        ass_file = gen_ass
-                except Exception as e:
-                    _api_logger.warning("Could not auto-generate subtitles for %s: %s", jid, e)
-
-        if ass_file:
-            temp_sub_dir = get_workspace_dir() / ".cache" / "edit"
-            temp_sub_dir.mkdir(parents=True, exist_ok=True)
-            temp_ass = temp_sub_dir / f"burn_{int(time.time())}.ass"
-            temp_ass.write_text(ass_file.read_text(encoding="utf-8"), encoding="utf-8")
-            escaped_ass = str(temp_ass.resolve()).replace("\\", "/").replace(":", r"\:")
-            step_idx += 1
-            next_chain = f"[v{step_idx}]"
-            filter_parts.append(f"{v_chain}subtitles='{escaped_ass}'{next_chain}")
-            v_chain = next_chain
-
     # Audio input mapping: preserve existing audio (contains full mix if preview_dubbed or exported vi.mp4)
     audio_map = ["-map", "0:a?"]
     jid = req.job_id or (v_path.parent.name if v_path.parent.parent.name == "workspace" else None)
@@ -2480,6 +2489,15 @@ def edit_video_api(req: EditVideoRequest):
         p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
         if p.returncode == 0:
             stop_tts_worker()
+            if jid:
+                try:
+                    import shutil
+                    from dubstudio.paths import resolve_job_workspace
+                    ws_dest = resolve_job_workspace(jid) / out_file.name
+                    if out_file.resolve() != ws_dest.resolve():
+                        shutil.copy2(out_file, ws_dest)
+                except Exception as e:
+                    _api_logger.warning("Could not copy output video to job workspace: %s", e)
             return {
                 "status": "success",
                 "file": out_file.name,

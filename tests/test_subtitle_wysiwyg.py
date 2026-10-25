@@ -160,12 +160,12 @@ def test_audio_200pct_loudness_and_peak(tmp_path):
     eq_chain = (
         "aresample=48000,"
         "highpass=f=80,"
-        "equalizer=f=180:t=q:w=1.2:g=2.0,"
-        "equalizer=f=5500:t=q:w=1.5:g=-2.5"
+        "equalizer=f=350:t=q:w=1.4:g=-1.2,"
+        "equalizer=f=3200:t=q:w=1.2:g=1.8"
     )
 
-    filt_100 = f"{eq_chain},volume=0.85,alimiter=limit=0.92:attack=5:release=50:asc=0"
-    filt_200 = f"{eq_chain},acompressor=threshold=-23dB:ratio=3.0:attack=5:release=60:makeup=14dB,alimiter=limit=0.89:attack=3:release=40:level=disabled"
+    filt_100 = f"{eq_chain},volume=1.00"
+    filt_200 = f"{eq_chain},volume=20.00dB,alimiter=limit=0.98:attack=1:release=15:level=disabled"
 
     out_100 = tmp_path / "voice_100.wav"
     out_200 = tmp_path / "voice_200.wav"
@@ -193,4 +193,182 @@ def test_audio_200pct_loudness_and_peak(tmp_path):
     assert lufs_delta >= 6.0, f"200% boost insufficient: only +{lufs_delta:.2f} LUFS"
     # 2. Peak must be strictly below 0 dBFS (safe margin <= -0.3 dBFS)
     assert pk_200 <= -0.3, f"200% True Peak exceeds safe ceiling: {pk_200} dBFS"
+
+
+def test_subtitle_relative_geometry_across_widget_sizes(qapp):
+    """
+    Test 1: Verify relative subtitle box geometry (box_w/inner_w, box_h/inner_h, box_left/inner_w, box_top/inner_h)
+    is identical (error <= 0.005) between different widget display sizes
+    (e.g., Tab Phụ đề 780x438 vs Trang Chỉnh sửa 710x400).
+    """
+    from dubstudio.subtitles.ass import compute_subtitle_geometry
+    from ui.widgets.video_player import VideoPlayerWidget
+
+    native_w, native_h = 1280, 720
+    text = "Xin chào! Đây là phụ đề kiểm thử độ chính xác hiển thị."
+    style = {
+        "font_name": "Arial",
+        "font_size": 24,
+        "box_width_pct": 85.0,
+        "box_padding_x": 14,
+        "box_padding_y": 8,
+        "position": "bottom",
+        "margin_v": 35,
+    }
+
+    player = VideoPlayerWidget()
+    player._video_native_w = native_w
+    player._video_native_h = native_h
+    player.update_subtitle_overlay(text, style, visible=True)
+
+    # Size 1: Tab Phụ đề (780 x 438)
+    player.resize(780, 480)
+    player._view.viewport().resize(780, 438)
+    player._on_container_resized()
+    dx1, dy1, dw1, dh1, _ = player._get_active_video_rect()
+    w1 = player._sub_overlay.width()
+    h1 = player._sub_overlay.height()
+    proxy1 = player._proxy.pos()
+    x1 = proxy1.x() - dx1
+    y1 = proxy1.y() - dy1
+
+    # Size 2: Trang Chỉnh sửa (710 x 400)
+    player.resize(710, 440)
+    player._view.viewport().resize(710, 400)
+    player._on_container_resized()
+    dx2, dy2, dw2, dh2, _ = player._get_active_video_rect()
+    w2 = player._sub_overlay.width()
+    h2 = player._sub_overlay.height()
+    proxy2 = player._proxy.pos()
+    x2 = proxy2.x() - dx2
+    y2 = proxy2.y() - dy2
+
+    # Relative ratios against inner video rectangle
+    rw1, rh1, rx1, ry1 = w1 / dw1, h1 / dh1, x1 / dw1, y1 / dh1
+    rw2, rh2, rx2, ry2 = w2 / dw2, h2 / dh2, x2 / dw2, y2 / dh2
+
+    assert abs(rw1 - rw2) <= 0.005, f"Width ratio mismatch: {rw1} vs {rw2}"
+    assert abs(rh1 - rh2) <= 0.005, f"Height ratio mismatch: {rh1} vs {rh2}"
+    assert abs(rx1 - rx2) <= 0.005, f"X ratio mismatch: {rx1} vs {rx2}"
+    assert abs(ry1 - ry2) <= 0.005, f"Y ratio mismatch: {ry1} vs {ry2}"
+
+
+def test_subtitle_relative_geometry_canvas_aspect_expansion(qapp):
+    """
+    Test 2: Verify relative subtitle box coordinates on inner_video_rect remain unchanged
+    (error <= 0.005) whether 9:16 canvas aspect expansion is OFF or ON.
+    """
+    from ui.widgets.video_player import VideoPlayerWidget
+
+    native_w, native_h = 1280, 720
+    text = "Xin chào! Đây là phụ đề kiểm thử mở rộng tỉ lệ nền."
+    style = {
+        "font_name": "Arial",
+        "font_size": 24,
+        "box_width_pct": 85.0,
+        "position": "bottom",
+        "margin_v": 35,
+    }
+
+    player = VideoPlayerWidget()
+    player._video_native_w = native_w
+    player._video_native_h = native_h
+    player.resize(800, 600)
+    player._view.viewport().resize(800, 560)
+    player.update_subtitle_overlay(text, style, visible=True)
+
+    # State A: Canvas Aspect Ratio Disabled (16:9 original)
+    player.set_canvas_aspect_ratio("original", "#FFFFFF", enabled=False)
+    player._on_container_resized()
+    dx_a, dy_a, dw_a, dh_a, _ = player._get_active_video_rect()
+    w_a = player._sub_overlay.width()
+    h_a = player._sub_overlay.height()
+    pos_a = player._proxy.pos()
+    x_a = pos_a.x() - dx_a
+    y_a = pos_a.y() - dy_a
+
+    # State B: Canvas Aspect Ratio Enabled (9:16 expanded)
+    player.set_canvas_aspect_ratio("9:16", "#FFFFFF", enabled=True)
+    player._on_container_resized()
+    dx_b, dy_b, dw_b, dh_b, _ = player._get_active_video_rect()
+    w_b = player._sub_overlay.width()
+    h_b = player._sub_overlay.height()
+    pos_b = player._proxy.pos()
+    x_b = pos_b.x() - dx_b
+    y_b = pos_b.y() - dy_b
+
+    # Relative ratios on inner video rect (error strictly <= 0.005 due to integer pixel sizing)
+    rw_a, rh_a, rx_a, ry_a = w_a / dw_a, h_a / dh_a, x_a / dw_a, y_a / dh_a
+    rw_b, rh_b, rx_b, ry_b = w_b / dw_b, h_b / dh_b, x_b / dw_b, y_b / dh_b
+
+    assert abs(rw_a - rw_b) <= 0.005, f"Relative box width mismatch: {rw_a} vs {rw_b}"
+    assert abs(rh_a - rh_b) <= 0.005, f"Relative box height mismatch: {rw_a} vs {rw_b}"
+    assert abs(rx_a - rx_b) <= 0.005, f"Relative box X mismatch: {rx_a} vs {rx_b}"
+    assert abs(ry_a - ry_b) <= 0.005, f"Relative box Y mismatch: {ry_a} vs {ry_b}"
+
+
+def test_export_9_16_canvas_subtitles_inside_video_area(tmp_path):
+    """
+    Test 3: Render 1 test frame via FFmpeg with 9:16 aspect ratio expansion and #FFFFFF white canvas.
+    Verify top and bottom white padding areas have 100% #FFFFFF pixels (no subtitle spillover),
+    and subtitles are burned cleanly inside the inner video frame.
+    """
+    ffmpeg_exe = resolve_tool("ffmpeg")
+    vid_w, vid_h = 720, 405  # 16:9
+    canvas_w, canvas_h = 720, 1280  # 9:16
+    top_pad = (canvas_h - vid_h) // 2  # 437
+    bottom_pad_start = top_pad + vid_h  # 842
+
+    style = {
+        "font_name": "Arial",
+        "font_size": 24,
+        "has_box": True,
+        "box_color": "#000000",
+        "box_opacity": 0.8,
+        "box_radius": 6,
+        "box_padding_x": 14,
+        "box_padding_y": 8,
+        "box_width_pct": 85.0,
+        "position": "bottom",
+        "margin_v": 35,
+        "primary_color": "#FFFF00",
+        "outline_color": "#000000",
+        "outline_width": 2,
+        "text_align": "center",
+    }
+    segs = [{"id": 1, "start": 0.0, "end": 2.0, "vi_text": "Phụ đề nằm hoàn toàn bên trong khung video"}]
+    ass_file = tmp_path / "sub_916.ass"
+    generate_ass_subtitles(segs, ass_file, style=style, video_width=vid_w, video_height=vid_h)
+
+    escaped_ass = str(ass_file.resolve()).replace("\\", "/").replace(":", r"\:")
+    out_png = tmp_path / "frame_916.png"
+
+    # Burn subtitles directly on video frame BEFORE pad filter (matching edit_video_api)
+    vf = f"subtitles='{escaped_ass}',pad={canvas_w}:{canvas_h}:(ow-iw)/2:(oh-ih)/2:color=0xFFFFFF"
+    cmd = [
+        ffmpeg_exe, "-y",
+        "-f", "lavfi", "-i", f"color=c=blue:s={vid_w}x{vid_h}:d=1",
+        "-vf", vf,
+        "-vframes", "1",
+        str(out_png),
+    ]
+    subprocess.run(cmd, capture_output=True, check=True)
+
+    arr = np.array(Image.open(out_png))
+    assert arr.shape == (canvas_h, canvas_w, 3) or arr.shape == (canvas_h, canvas_w, 4)
+
+    # Top padding region: y from 0 to 420 (well inside top padding)
+    top_region = arr[0:420, :, :3]
+    assert np.all(top_region >= 250), "Top white padding contains subtitle artifacts!"
+
+    # Bottom padding region: y from 860 to 1279 (well inside bottom padding)
+    bottom_region = arr[860:1279, :, :3]
+    assert np.all(bottom_region >= 250), "Bottom white padding contains subtitle artifacts!"
+
+    # Middle video region: must contain the yellow subtitle text or black box
+    video_region = arr[top_pad:bottom_pad_start, :, :3]
+    # Check that it's not all pure blue, proving subtitles were rendered inside the video
+    non_blue_pixels = np.sum((video_region[:, :, 2] < 200) | (video_region[:, :, 0] > 50))
+    assert non_blue_pixels > 500, "Subtitles not found inside the video area!"
+
 

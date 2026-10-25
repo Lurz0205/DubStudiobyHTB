@@ -593,6 +593,7 @@ class StudioPage(QWidget):
         self._spin_words_per_line.setFixedWidth(84)
         self._spin_words_per_line.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._spin_words_per_line.setToolTip("Số từ mục tiêu trên mỗi dòng phụ đề (9:16 -> 5, 1:1 -> 6, 16:9 -> 9)")
+        self._spin_words_per_line.valueChanged.connect(self._on_words_per_line_changed)
         row2_layout.addWidget(self._spin_words_per_line)
 
         self._btn_auto_split = QPushButton(" Tách tự động")
@@ -1003,6 +1004,14 @@ class StudioPage(QWidget):
             if hasattr(self, "_video_player") and self._video_player:
                 self._video_player.seek(r_pos)
 
+        # Automatically execute split cues once if triggered right after Step 1 pipeline completes
+        if getattr(self, "_auto_split_on_load", False):
+            self._auto_split_on_load = False
+            try:
+                self._on_auto_split_cues_clicked(silent=True)
+            except Exception:
+                pass
+
     def load_job_by_id(self, job_id: str):
         """Externally switch active job and reload Studio immediately."""
         self._current_job_id = job_id
@@ -1052,9 +1061,24 @@ class StudioPage(QWidget):
         self._workers.append(w)
         w.start()
 
-    def _on_auto_split_cues_clicked(self):
+    def _on_words_per_line_changed(self, val: int):
+        """Persist target words_per_line immediately when adjusted by user."""
+        if self._current_job_id:
+            try:
+                from dubstudio.paths import resolve_job_workspace
+                ws_dir = resolve_job_workspace(self._current_job_id)
+                conf_file = ws_dir / "job_config.json"
+                import json
+                conf_data = json.loads(conf_file.read_text(encoding="utf-8")) if conf_file.exists() else {}
+                conf_data["words_per_line"] = int(val)
+                conf_file.write_text(json.dumps(conf_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+
+    def _on_auto_split_cues_clicked(self, silent: bool = False):
         if not self._current_job_id or not getattr(self, "_current_segments", None):
-            QMessageBox.warning(self, "Tách tự động", "Chưa có tác vụ hoặc phụ đề nào được tải.")
+            if not silent:
+                QMessageBox.warning(self, "Tách tự động", "Chưa có tác vụ hoặc phụ đề nào được tải.")
             return
 
         target_n = self._spin_words_per_line.value()
@@ -1112,11 +1136,12 @@ class StudioPage(QWidget):
             pos_sec = getattr(self._video_player, "_current_pos_sec", 0.0)
             self._on_player_pos_changed(pos_sec)
 
-        QMessageBox.information(
-            self,
-            "Tách phụ đề tự động",
-            f"Đã hoàn thành tách phụ đề theo {target_n} từ/dòng cho toàn bộ {len(self._current_segments)} câu thoại (bảo toàn các dòng đã khóa)."
-        )
+        if not silent:
+            QMessageBox.information(
+                self,
+                "Tách phụ đề tự động",
+                f"Đã hoàn thành tách phụ đề theo {target_n} từ/dòng cho toàn bộ {len(self._current_segments)} câu thoại (bảo toàn các dòng đã khóa)."
+            )
 
     def _run_subtitles_pipeline(self):
         """Run stages 1 to 8: ingest up to translation to generate subtitles for review."""
@@ -1259,6 +1284,9 @@ class StudioPage(QWidget):
                 self._btn_create_dub.setEnabled(True)
             self._progress_bar.setVisible(False)
             self._lbl_status.setVisible(False)
+
+            if subtitles_only:
+                self._auto_split_on_load = True
 
             # Load job immediately so table & video are populated BEFORE modal popup appears
             self._load_current_job()

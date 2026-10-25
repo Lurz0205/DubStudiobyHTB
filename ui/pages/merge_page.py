@@ -562,6 +562,22 @@ class MergePage(QWidget):
         h_out_name.addWidget(self._txt_edit_out_name, 1)
         card_overlay.add_layout(h_out_name)
 
+        h_out_dir = QHBoxLayout()
+        h_out_dir.addWidget(QLabel("Thư mục:"))
+        from dubstudio.paths import get_out_dir
+        self._lbl_edit_out_dir = QLabel(str(get_out_dir()))
+        self._lbl_edit_out_dir.setStyleSheet("color: #9ca3af; font-size: 11px;")
+        self._lbl_edit_out_dir.setWordWrap(True)
+        h_out_dir.addWidget(self._lbl_edit_out_dir, 1)
+
+        btn_change_out = QPushButton()
+        btn_change_out.setIcon(get_icon("folder", "#9ca3af", "#f0f2f5", 13))
+        btn_change_out.setToolTip("Đổi thư mục lưu video")
+        btn_change_out.setFixedSize(28, 28)
+        btn_change_out.clicked.connect(self._change_output_folder)
+        h_out_dir.addWidget(btn_change_out)
+        card_overlay.add_layout(h_out_dir)
+
         self._btn_run_edit = QPushButton(" Xuất video")
         self._btn_run_edit.setIcon(get_icon("play", "#ffffff", "#ffffff", 14))
         self._btn_run_edit.setObjectName("primary")
@@ -883,6 +899,8 @@ class MergePage(QWidget):
             self._job_id = job_id
             self._txt_src_video.setText(path)
             if self._job_id:
+                if hasattr(self, "_txt_edit_out_name"):
+                    self._txt_edit_out_name.setText(f"{self._job_id}.mp4")
                 self._load_project_subtitles(self._job_id)
             else:
                 self._clear_subtitles()
@@ -890,19 +908,77 @@ class MergePage(QWidget):
     def showEvent(self, event):
         super().showEvent(event)
         self._refresh_project_videos()
+        if hasattr(self, "_lbl_edit_out_dir"):
+            from dubstudio.paths import get_out_dir
+            self._lbl_edit_out_dir.setText(str(get_out_dir()))
+        if hasattr(self, "_video_player") and self._video_player:
+            self._video_player.set_overlay_draggable(False)
         if hasattr(self, "_editor_overlay") and self._video_player:
             self._editor_overlay.setGeometry(self._video_player._view.viewport().rect())
             self._editor_overlay.raise_()
             self._editor_overlay.update()
 
+    def _change_output_folder(self):
+        """Allow user to select custom export directory and persist."""
+        from dubstudio.paths import get_out_dir
+        new_d = QFileDialog.getExistingDirectory(self, "Chọn thư mục lưu video xuất", str(get_out_dir()))
+        if new_d:
+            os.environ["DUBSTUDIO_OUT_DIR"] = new_d
+            if hasattr(self, "_lbl_edit_out_dir"):
+                self._lbl_edit_out_dir.setText(new_d)
+
+    def load_project_data(self, job_id: str, video_path: str, style: Optional[dict] = None, segments: Optional[list] = None):
+        """Seamlessly transition from Subtitle tab into Merge/Export page with 1:1 live preview."""
+        if job_id:
+            self._job_id = job_id
+            if hasattr(self, "_txt_edit_out_name"):
+                self._txt_edit_out_name.setText(f"{job_id}.mp4")
+
+        if style:
+            self._style = dict(style)
+        if segments:
+            self._segments = list(segments)
+
+        if hasattr(self, "_txt_src_video") and video_path:
+            self._txt_src_video.setText(video_path)
+
+        if self._job_id and (not style or not segments):
+            self._load_project_subtitles(self._job_id)
+
+        if hasattr(self, "_chk_subtitles"):
+            self._chk_subtitles.blockSignals(True)
+            self._chk_subtitles.setEnabled(True)
+            self._chk_subtitles.setChecked(True)
+            self._chk_subtitles.setText(f"Nhúng phụ đề tiếng Việt (Dự án: {job_id})")
+            self._chk_subtitles.blockSignals(False)
+
+        # Configure player
+        if hasattr(self, "_video_player") and self._video_player:
+            self._video_player.set_overlay_draggable(False)
+            self._video_player.set_overlay_preview_visible(True)
+
+            # Setup multi-track audio for preview if video loaded
+            if self._job_id:
+                from dubstudio.paths import resolve_job_workspace
+                ws_dir = resolve_job_workspace(self._job_id)
+                self._video_player.setup_job_audio(workspace_dir=ws_dir)
+
+            self._on_player_pos_changed(self._video_player.get_position())
+
+        self._on_scale_config_changed()
+
     def load_video_path(self, path_str: str, job_id: str = ""):
         """Load video path passed from previous workflow tabs."""
         if job_id:
             self._job_id = job_id
+            if hasattr(self, "_txt_edit_out_name"):
+                self._txt_edit_out_name.setText(f"{job_id}.mp4")
         if hasattr(self, "_txt_src_video") and path_str:
             self._txt_src_video.setText(path_str)
         if self._job_id:
             self._load_project_subtitles(self._job_id)
+        if hasattr(self, "_video_player") and self._video_player:
+            self._video_player.set_overlay_draggable(False)
         self._on_scale_config_changed()
 
     def _load_project_subtitles(self, job_id: str):
@@ -1035,6 +1111,15 @@ class MergePage(QWidget):
                 break
 
         style = getattr(self, "_style", {}) or {}
+        if not current_text:
+            is_playing = False
+            if hasattr(self._video_player, "_player"):
+                from PyQt6.QtMultimedia import QMediaPlayer
+                is_playing = (self._video_player._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState)
+            if not is_playing:
+                first_seg_text = segments[0].get("text_vi") if (segments and isinstance(segments[0], dict)) else None
+                current_text = first_seg_text or "Xin chào! Đây là phụ đề mẫu tiếng Việt."
+
         if current_text:
             self._video_player.update_subtitle_overlay(current_text, style, visible=True)
         else:
@@ -1273,17 +1358,18 @@ class MergePage(QWidget):
         enable_scale = hasattr(self, "_chk_enable_scale") and self._chk_enable_scale.isChecked()
         enable_subs = hasattr(self, "_chk_subtitles") and self._chk_subtitles.isChecked()
 
-        if not enable_crop and not enabled_boxes and not enable_img and not enable_scale and not enable_subs:
-            QMessageBox.information(
-                self,
-                "Chưa bật tính năng",
-                "Vui lòng bật ít nhất một tùy chọn: Cắt khung hình (Crop), Đổi tỉ lệ (Scale), Khối màu che, Logo hoặc Nhúng phụ đề!",
-            )
-            return
+        out_name = self._txt_edit_out_name.text().strip()
+        if not out_name or out_name == "edited_video.mp4":
+            if self._job_id:
+                out_name = f"{self._job_id}.mp4"
+            else:
+                out_name = "edited_video.mp4"
+        if not out_name.endswith(".mp4"):
+            out_name += ".mp4"
 
         payload: dict = {
             "video_path": v_path,
-            "output_name": self._txt_edit_out_name.text().strip() or "edited_video.mp4",
+            "output_name": out_name,
             "job_id": self._job_id or None,
             "subtitles_enabled": enable_subs,
             "subtitles_path": getattr(self, "_subtitles_path", "") or None,
@@ -1332,7 +1418,7 @@ class MergePage(QWidget):
         def _on_done(res: dict):
             self._btn_run_edit.setEnabled(True)
             self._progress_edit.setVisible(False)
-            out_file = res.get("file", "edited_video.mp4")
+            out_file = res.get("file") or out_name
             out_path = res.get("path", "")
             self._lbl_edit_status.setText(f"✓ Xử lý thành công: {out_file}")
 
@@ -1341,19 +1427,44 @@ class MergePage(QWidget):
             self._workers.append(w_stop)
             w_stop.start()
 
-            # Reload output video into player so user can view results immediately!
-            if out_path and Path(out_path).exists():
-                self._txt_src_video.setText(out_path)
+            from dubstudio.paths import get_out_dir, open_in_file_manager
+            target_p = Path(out_path).resolve() if (out_path and Path(out_path).exists()) else (get_out_dir() / out_file)
 
-            reply = QMessageBox.information(
-                self,
-                "Chỉnh sửa thành công",
-                f"Video đã xuất thành công tại:\n{out_path}\n\nBạn có muốn mở thư mục kết quả không?",
-                QMessageBox.StandardButton.Open | QMessageBox.StandardButton.Ok,
+            if self._job_id and target_p.exists():
+                try:
+                    import shutil
+                    from dubstudio.paths import resolve_job_workspace
+                    ws_dest = resolve_job_workspace(self._job_id) / target_p.name
+                    if target_p.resolve() != ws_dest.resolve():
+                        shutil.copy2(target_p, ws_dest)
+                except Exception:
+                    pass
+
+            # Reload output video into player so user can view results immediately!
+            if target_p.exists():
+                self._txt_src_video.setText(str(target_p))
+                if hasattr(self, "_video_player") and self._video_player:
+                    self._video_player.load_video(str(target_p))
+
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Xuất video thành công")
+            msg.setText(
+                f"Đã xuất thành công video:\n\n"
+                f"📹 Tập tin: {target_p.name}\n"
+                f"📂 Thư mục: {target_p.parent}"
             )
-            if reply == QMessageBox.StandardButton.Open:
-                from dubstudio.paths import open_in_file_manager
-                open_in_file_manager(Path(out_path) if out_path else get_out_dir())
+            btn_play = msg.addButton("Xem video ngay", QMessageBox.ButtonRole.AcceptRole)
+            btn_folder = msg.addButton("Mở thư mục video", QMessageBox.ButtonRole.ActionRole)
+            msg.addButton("Đóng", QMessageBox.ButtonRole.RejectRole)
+
+            msg.exec()
+            if msg.clickedButton() == btn_play:
+                if target_p.exists():
+                    open_in_file_manager(target_p)
+                elif hasattr(self, "_video_player") and self._video_player:
+                    self._video_player.play()
+            elif msg.clickedButton() == btn_folder:
+                open_in_file_manager(target_p)
 
         def _on_err(err: str):
             self._btn_run_edit.setEnabled(True)

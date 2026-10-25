@@ -284,13 +284,19 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
         combined_bgm = ducked_bgm + passthrough_audio
         sf.write(str((job.workspace / "bgm_effective.wav").resolve()), combined_bgm, sr)
 
-    # Normalize voice track to prevent clipping
+    # Normalize voice track only if peaks exceed 0.98 to prevent clipping
     max_val = np.max(np.abs(voice_track))
-    if max_val > 0.95:
-        voice_track = (voice_track / max_val) * 0.95
+    if max_val > 0.98:
+        voice_track = (voice_track / max_val) * 0.98
+
+    # Ensure 2-channel stereo without ITU pan attenuation
+    if voice_track.ndim == 1:
+        voice_stereo = np.column_stack([voice_track, voice_track])
+    else:
+        voice_stereo = voice_track
 
     raw_voice_wav = job.workspace / "voice_raw.wav"
-    sf.write(str(raw_voice_wav.resolve()), voice_track, sr)
+    sf.write(str(raw_voice_wav.resolve()), voice_stereo, sr)
 
     # Combine with BGM if available
     bgm_wav = job.workspace / "audio" / "bgm.wav"
@@ -330,35 +336,23 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
 
     # Build dynamic ffmpeg inputs and audio filters
     # Input 0 is always raw_voice_wav (its duration sets video length)
-    # Studio Broadcast Vocal Mastering:
-    # 1. aresample=48000: smooth anti-aliased 48kHz sampling for broadcast
-    # 2. highpass=f=80: eliminates subsonic rumble and mic plosives
-    # 3. equalizer=f=180:t=q:w=1.2:g=2.0: adds warmth and vocal chest resonance
-    # 4. equalizer=f=5500:t=q:w=1.5:g=-2.5: softens harsh sibilance and metallic TTS artifacts
-    # 5. Upward Compression + Brickwall Limiter:
-    #    - nominal 100%: clean natural reference (-20 LUFS)
-    #    - 100% to 200%: smooth dynamic compression + makeup gain up to +14dB (+8.4 LUFS real boost, 0 clipping)
-    eq_chain = (
-        "aresample=48000,"
-        "highpass=f=80,"
-        "equalizer=f=180:t=q:w=1.2:g=2.0,"
-        "equalizer=f=5500:t=q:w=1.5:g=-2.5"
-    )
+    # Studio Vocal Enhancement & 0-200% Leveling (+20dB at 200%):
+    # 1. highpass=f=80: cuts sub-bass rumble/mic thumps below 80Hz
+    # 2. equalizer=f=3200:t=q:w=1.2:g=1.8: speech intelligibility & presence lift
+    # 3. equalizer=f=350:t=q:w=1.4:g=-1.2: cleans boxy lower-mid mud
+    # 0% -> 100%: 100% exact original volume of raw_voice_wav (0dB difference at 100%)
+    # 101% -> 200%: Direct amplitude amplification up to +20.0 dB at 200% with transparent peak limiter
+    eq_chain = "highpass=f=80,equalizer=f=350:t=q:w=1.4:g=-1.2,equalizer=f=3200:t=q:w=1.2:g=1.8"
     if vi_voice_volume <= 1.0:
-        gain = max(0.01, vi_voice_volume)
-        vi_filter = (
-            f"{eq_chain},"
-            f"volume={gain:.2f},"
-            f"alimiter=limit=0.92:attack=5:release=50:asc=0,"
-            f"aformat=channel_layouts=stereo"
-        )
+        gain = max(0.0, vi_voice_volume)
+        vi_filter = f"{eq_chain},volume={gain:.2f},aresample=48000,aformat=channel_layouts=stereo"
     else:
-        makeup_db = (vi_voice_volume - 1.0) * 14.0
+        gain_db = (vi_voice_volume - 1.0) * 20.0
         vi_filter = (
             f"{eq_chain},"
-            f"acompressor=threshold=-23dB:ratio=3.0:attack=5:release=60:makeup={makeup_db:.1f}dB,"
-            f"alimiter=limit=0.89:attack=3:release=40:level=disabled,"
-            f"aformat=channel_layouts=stereo"
+            f"volume={gain_db:.2f}dB,"
+            f"alimiter=limit=0.98:attack=1:release=15:level=disabled,"
+            f"aresample=48000,aformat=channel_layouts=stereo"
         )
 
     inputs = ["-i", str(raw_voice_wav.resolve())]

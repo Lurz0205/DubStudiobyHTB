@@ -9,7 +9,7 @@ Write-Host "==========================================================" -Foregro
 
 # Stop any running DubStudio instance to avoid file locks
 Get-Process DubStudio -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Milliseconds 500
+Start-Sleep -Seconds 2
 
 & $Py -m PyInstaller `
     --noconfirm `

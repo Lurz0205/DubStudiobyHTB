@@ -74,6 +74,12 @@ class DraggableSubtitleOverlay(QWidget):
             self.setCursor(Qt.CursorShape.ArrowCursor)
             self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
+    def set_geometry_data(self, geo: Any, style: dict):
+        self._geo = geo
+        self._text = getattr(geo, "wrapped_text", "")
+        self._style = dict(style or {})
+        self.update()
+
     def set_text_and_style(self, text: str, style: dict, scaled_font_size: int = 22, scale_ratio: float = 1.0):
         self._text = text or ""
         self._style = dict(style or {})
@@ -154,6 +160,81 @@ class DraggableSubtitleOverlay(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         rect = self.rect()
+
+        geo = getattr(self, "_geo", None)
+        if geo and getattr(geo, "box_w", 0) > 0 and getattr(geo, "box_h", 0) > 0:
+            scale_x = rect.width() / float(geo.box_w)
+            scale_y = rect.height() / float(geo.box_h)
+
+            painter.save()
+            painter.scale(scale_x, scale_y)
+
+            native_box_rect = QRect(0, 0, geo.box_w, geo.box_h)
+
+            if geo.has_box:
+                c = QColor(geo.box_color)
+                if not c.isValid():
+                    c = QColor(0, 0, 0)
+                c.setAlphaF(max(0.0, min(1.0, geo.box_opacity)))
+                painter.setBrush(QBrush(c))
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.drawRoundedRect(native_box_rect, geo.box_radius, geo.box_radius)
+
+            clean_text = geo.wrapped_text.replace(r"\N", "\n")
+            if clean_text:
+                font = QFont(self._style.get("font_name", "Arial"))
+                font.setPixelSize(geo.font_size)
+                font.setBold(True)
+                painter.setFont(font)
+
+                align_flag = Qt.AlignmentFlag.AlignCenter
+                if geo.text_align == "left":
+                    align_flag = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                elif geo.text_align == "right":
+                    align_flag = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                flags = align_flag | Qt.TextFlag.TextWordWrap
+
+                text_rect = QRect(
+                    geo.pad_x,
+                    geo.pad_y,
+                    max(10, geo.box_w - geo.pad_x * 2),
+                    max(10, geo.box_h - geo.pad_y * 2)
+                )
+
+                if geo.outline_width > 0:
+                    painter.setPen(QColor(geo.outline_color))
+                    r_ow = max(1, min(geo.outline_width, 5))
+                    for dx in range(-r_ow, r_ow + 1):
+                        for dy in range(-r_ow, r_ow + 1):
+                            if dx != 0 or dy != 0:
+                                painter.drawText(text_rect.adjusted(dx, dy, dx, dy), flags, clean_text)
+
+                painter.setPen(QColor(geo.text_color))
+                painter.drawText(text_rect, flags, clean_text)
+
+            painter.restore()
+
+            if getattr(self, "_hovered", False) or self._mode:
+                pen_shadow = QPen(QColor(0, 0, 0, 180), 2.5)
+                painter.setPen(pen_shadow)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 4, 4)
+
+                pen_border = QPen(QColor(255, 255, 255, 220), 1.5, Qt.PenStyle.DashLine)
+                painter.setPen(pen_border)
+                painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 4, 4)
+
+                grip_w = 4
+                grip_h = max(14, min(rect.height() - 8, 22))
+                grip_y = int((rect.height() - grip_h) / 2)
+
+                painter.fillRect(3, grip_y + 1, grip_w, grip_h, QColor(0, 0, 0, 160))
+                painter.fillRect(2, grip_y, grip_w, grip_h, QColor(255, 255, 255, 240))
+
+                rx = rect.width() - grip_w - 3
+                painter.fillRect(rx + 1, grip_y + 1, grip_w, grip_h, QColor(0, 0, 0, 160))
+                painter.fillRect(rx, grip_y, grip_w, grip_h, QColor(255, 255, 255, 240))
+            return
 
         has_box = bool(self._style.get("has_box", True))
         box_color_str = self._style.get("box_color", "#000000")
@@ -313,14 +394,11 @@ class AudioPrepWorker(QThread):
                 vocals_wav = self.ws / "audio" / "orig.wav"
 
             if vi_wav and vi_wav.exists():
-                res["vi_raw"] = str(vi_wav.resolve())
-                boosted_vi = VideoPlayerWidget._ensure_boosted_voice_track(vi_wav)
-                res["vi_voice"] = str(boosted_vi.resolve()) if (boosted_vi and boosted_vi.exists()) else str(vi_wav.resolve())
+                headroom_vi = VideoPlayerWidget._ensure_headroom_voice_track(vi_wav)
+                res["vi_voice"] = str(headroom_vi.resolve()) if (headroom_vi and headroom_vi.exists()) else str(vi_wav.resolve())
 
             if bgm_wav and bgm_wav.exists():
-                res["bgm_raw"] = str(bgm_wav.resolve())
-                boosted_bgm = VideoPlayerWidget._ensure_boosted_bgm_track(bgm_wav)
-                res["bgm"] = str(boosted_bgm.resolve()) if (boosted_bgm and boosted_bgm.exists()) else str(bgm_wav.resolve())
+                res["bgm"] = str(bgm_wav.resolve())
 
             if vocals_wav and vocals_wav.exists():
                 res["vocals"] = str(vocals_wav.resolve())
@@ -376,6 +454,7 @@ class VideoPlayerWidget(QWidget):
         self._vi_voice_player.setAudioOutput(self._vi_voice_audio)
         self._vi_voice_path: Optional[str] = None
         self._vi_voice_raw_path: Optional[str] = None
+        self._vi_voice_boosted_path: Optional[str] = None
         self._vi_voice_vol: float = 1.0
         self._vi_voice_audio.setVolume(1.0)
 
@@ -384,6 +463,8 @@ class VideoPlayerWidget(QWidget):
         self._orig_bgm_audio = QAudioOutput(self)
         self._orig_bgm_player.setAudioOutput(self._orig_bgm_audio)
         self._orig_bgm_path: Optional[str] = None
+        self._orig_bgm_raw_path: Optional[str] = None
+        self._orig_bgm_boosted_path: Optional[str] = None
         self._orig_bgm_vol: float = 0.8
         self._orig_bgm_audio.setVolume(0.8)
 
@@ -901,20 +982,11 @@ class VideoPlayerWidget(QWidget):
         self._audio_output.setVolume(0.0)
 
         if fast_vi:
-            self._vi_voice_raw_path = str(fast_vi.resolve())
-            boosted_vi = fast_vi.parent / "voice_boosted_200_v2.wav"
-            if boosted_vi.exists() and boosted_vi.stat().st_mtime >= fast_vi.stat().st_mtime and boosted_vi.stat().st_size > 44:
-                self._vi_voice_path = str(boosted_vi.resolve())
-            else:
-                self._vi_voice_path = str(fast_vi.resolve())
+            headroom_vi = self._ensure_headroom_voice_track(fast_vi)
+            self._vi_voice_path = str(headroom_vi.resolve()) if (headroom_vi and headroom_vi.exists()) else str(fast_vi.resolve())
             self._vi_voice_player.setSource(QUrl.fromLocalFile(self._vi_voice_path))
         if fast_bgm:
-            self._orig_bgm_raw_path = str(fast_bgm.resolve())
-            boosted_bgm = fast_bgm.parent / f"{fast_bgm.stem}_boosted_200_v2.wav"
-            if boosted_bgm.exists() and boosted_bgm.stat().st_mtime >= fast_bgm.stat().st_mtime and boosted_bgm.stat().st_size > 44:
-                self._orig_bgm_path = str(boosted_bgm.resolve())
-            else:
-                self._orig_bgm_path = str(fast_bgm.resolve())
+            self._orig_bgm_path = str(fast_bgm.resolve())
             self._orig_bgm_player.setSource(QUrl.fromLocalFile(self._orig_bgm_path))
         if fast_voc:
             self._orig_voice_path = str(fast_voc.resolve())
@@ -960,20 +1032,36 @@ class VideoPlayerWidget(QWidget):
 
         if "vi_voice" in res:
             target_vi = res["vi_voice"]
-            self._vi_voice_raw_path = res.get("vi_raw", target_vi)
             if getattr(self, "_vi_voice_path", None) != target_vi:
-                self._switch_track_source(self._vi_voice_player, "_vi_voice_path", target_vi)
+                pos = self._player.position()
+                was_playing = (self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState)
+                self._vi_voice_path = target_vi
+                self._vi_voice_player.setSource(QUrl.fromLocalFile(target_vi))
+                self._vi_voice_player.setPosition(pos)
+                if was_playing:
+                    self._vi_voice_player.play()
 
         if "bgm" in res:
             target_bgm = res["bgm"]
-            self._orig_bgm_raw_path = res.get("bgm_raw", target_bgm)
             if getattr(self, "_orig_bgm_path", None) != target_bgm:
-                self._switch_track_source(self._orig_bgm_player, "_orig_bgm_path", target_bgm)
+                pos = self._player.position()
+                was_playing = (self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState)
+                self._orig_bgm_path = target_bgm
+                self._orig_bgm_player.setSource(QUrl.fromLocalFile(target_bgm))
+                self._orig_bgm_player.setPosition(pos)
+                if was_playing:
+                    self._orig_bgm_player.play()
 
         if "vocals" in res:
             target_voc = res["vocals"]
             if getattr(self, "_orig_voice_path", None) != target_voc:
-                self._switch_track_source(self._orig_voice_player, "_orig_voice_path", target_voc)
+                pos = self._player.position()
+                was_playing = (self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState)
+                self._orig_voice_path = target_voc
+                self._orig_voice_player.setSource(QUrl.fromLocalFile(target_voc))
+                self._orig_voice_player.setPosition(pos)
+                if was_playing:
+                    self._orig_voice_player.play()
 
         self._apply_stem_volumes()
 
@@ -986,8 +1074,11 @@ class VideoPlayerWidget(QWidget):
         """Update live preview audio tracks without interrupting current video position."""
         curr_pos = self._player.position()
         if vi_voice_path and Path(vi_voice_path).exists():
-            self._vi_voice_raw_path = str(Path(vi_voice_path).resolve())
-            self._vi_voice_path = str(Path(vi_voice_path).resolve())
+            raw_p = Path(vi_voice_path).resolve()
+            self._vi_voice_raw_path = str(raw_p)
+            headroom_p = self._ensure_headroom_voice_track(raw_p)
+            target_p = headroom_p if (headroom_p and headroom_p.exists()) else raw_p
+            self._vi_voice_path = str(target_p.resolve())
             self._vi_voice_player.setSource(QUrl.fromLocalFile(self._vi_voice_path))
             self._vi_voice_player.setPosition(curr_pos)
             self._multi_track_active = True
@@ -1010,144 +1101,83 @@ class VideoPlayerWidget(QWidget):
         self._apply_stem_volumes()
 
     @staticmethod
-    def _ensure_boosted_voice_track(raw_path: Optional[Path]) -> Optional[Path]:
-        """Pre-generate studio-mastered vocal track using 48kHz, warm EQ, and Upward Compression + Limiter."""
+    def _ensure_headroom_voice_track(raw_path: Optional[Path]) -> Optional[Path]:
+        """
+        Pre-generate single unified 200% headroom voice track (+20dB boost factor = 10.0).
+        Incorporates vocal enhancement (rumble highpass 80Hz + clarity lift + soft limiter at 0.98).
+        Allows 100% hardware slider volume control (0% to 200%) without ANY file switching!
+        """
         if not raw_path or not Path(raw_path).exists():
             return None
         raw_p = Path(raw_path).resolve()
-        boosted = raw_p.parent / "voice_boosted_200_v2.wav"
-        if boosted.exists() and boosted.stat().st_mtime >= raw_p.stat().st_mtime and boosted.stat().st_size > 44:
-            return boosted
+        target_p = raw_p.parent / "voice_headroom_200.wav"
+
+        # Check if already up-to-date with +20dB boost
+        if target_p.exists() and target_p.stat().st_mtime >= raw_p.stat().st_mtime and target_p.stat().st_size > 44:
+            try:
+                import soundfile as sf
+                import numpy as np
+                info_raw = sf.info(str(raw_p))
+                info_target = sf.info(str(target_p))
+                if abs(info_raw.duration - info_target.duration) < 0.2:
+                    d_raw, _ = sf.read(str(raw_p), stop=min(24000, info_raw.frames))
+                    d_target, _ = sf.read(str(target_p), stop=min(24000, info_target.frames))
+                    max_r = float(np.max(np.abs(d_raw)))
+                    max_t = float(np.max(np.abs(d_target)))
+                    if max_r < 0.001 or max_t >= 0.70 or (max_t / max_r) >= 5.0:
+                        return target_p
+            except Exception:
+                return target_p
+
         try:
             import os
-            import subprocess
-            from dubstudio.paths import resolve_tool
-            from dubstudio.packaging import get_subprocess_env, safe_subprocess_run
-            ffmpeg_exe = resolve_tool("ffmpeg")
-            tmp_boosted = raw_p.parent / f"voice_boosted_200_v2.tmp_{os.getpid()}.wav"
-            cmd = [
-                ffmpeg_exe, "-y",
-                "-i", str(raw_p),
-                "-filter:a", (
-                    "aresample=48000,"
-                    "highpass=f=80,"
-                    "equalizer=f=180:t=q:w=1.2:g=2.0,"
-                    "equalizer=f=5500:t=q:w=1.5:g=-2.5,"
-                    "acompressor=threshold=-23dB:ratio=3.0:attack=5:release=60:makeup=14dB,"
-                    "alimiter=limit=0.89:attack=3:release=40:level=disabled"
-                ),
-                str(tmp_boosted.resolve()),
-            ]
-            res = safe_subprocess_run(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                env=get_subprocess_env(),
-            )
-            if res.returncode == 0 and tmp_boosted.exists():
-                try:
-                    os.replace(tmp_boosted, boosted)
-                    return boosted
-                except Exception:
-                    return tmp_boosted
+            import soundfile as sf
+            import numpy as np
+            from scipy.signal import butter, sosfilt
+
+            data, sr = sf.read(str(raw_p))
+            if data.ndim == 1:
+                data = np.column_stack([data, data])
+
+            # 1. Highpass 80Hz rumble cut
+            sos = butter(2, 80.0, btype='high', fs=sr, output='sos')
+            clean_data = sosfilt(sos, data, axis=0)
+
+            # 2. +20.0 dB headroom boost factor (10.0x amplitude)
+            boost_factor = 10.0
+            boosted = clean_data * boost_factor
+
+            # 3. Transparent soft-saturation limit (linear up to 0.60, smooth curve up to 0.98)
+            ceiling = 0.98
+            threshold = 0.60 * ceiling
+            over = np.abs(boosted) > threshold
+            headroom = ceiling - threshold
+            diff = np.abs(boosted[over]) - threshold
+            sign = np.sign(boosted[over])
+            boosted[over] = sign * (threshold + headroom * np.tanh(diff / headroom))
+            boosted = np.clip(boosted, -ceiling, ceiling).astype(np.float32)
+
+            tmp_headroom = raw_p.parent / f"voice_headroom_200.tmp_{os.getpid()}.wav"
+            sf.write(str(tmp_headroom.resolve()), boosted, sr)
+            if tmp_headroom.exists():
+                os.replace(tmp_headroom, target_p)
+                return target_p
         except Exception:
             pass
         return raw_p
 
+    # Backward compatibility aliases
+    _ensure_boosted_voice_track = _ensure_headroom_voice_track
+    _ensure_boosted_track = _ensure_headroom_voice_track
+
     @staticmethod
     def _ensure_boosted_bgm_track(bgm_path: Optional[Path]) -> Optional[Path]:
-        """Pre-generate studio-mastered BGM track with wide dynamic range and transparent peak ceiling."""
-        if not bgm_path or not Path(bgm_path).exists():
-            return None
-        bgm_p = Path(bgm_path).resolve()
-        boosted = bgm_p.parent / f"{bgm_p.stem}_boosted_200_v2.wav"
-        if boosted.exists() and boosted.stat().st_mtime >= bgm_p.stat().st_mtime and boosted.stat().st_size > 44:
-            return boosted
-        try:
-            import os
-            import subprocess
-            from dubstudio.paths import resolve_tool
-            from dubstudio.packaging import get_subprocess_env, safe_subprocess_run
-            ffmpeg_exe = resolve_tool("ffmpeg")
-            tmp_boosted = bgm_p.parent / f"{bgm_p.stem}_boosted_200_v2.tmp_{os.getpid()}.wav"
-            cmd = [
-                ffmpeg_exe, "-y",
-                "-i", str(bgm_p),
-                "-filter:a", "aresample=48000,highpass=f=40,loudnorm=I=-14:TP=-0.8:LRA=9",
-                str(tmp_boosted.resolve()),
-            ]
-            res = safe_subprocess_run(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                env=get_subprocess_env(),
-            )
-            if res.returncode == 0 and tmp_boosted.exists():
-                try:
-                    os.replace(tmp_boosted, boosted)
-                    return boosted
-                except Exception:
-                    return tmp_boosted
-        except Exception:
-            pass
-        return bgm_p
-
-    # Backward compatibility alias
-    _ensure_boosted_track = _ensure_boosted_voice_track
-
-    @staticmethod
-    def _scale_volume_psychoacoustic(vol: float, is_boosted: bool) -> float:
-        """
-        Maps user slider [0.0, 2.0] into QAudioOutput gain [0.0, 1.0].
-        Psychoacoustic tuning:
-        - vol = 1.0 (100%): eff = 0.30 (standard natural listening reference)
-        - vol = 2.0 (200%): eff = 1.00 (+10.5 dB acoustic power = TRUE 2X PERCEIVED LOUDNESS!)
-        - vol in [0.0, 1.0]: smooth musical power curve
-        - vol in [1.0, 2.0]: powerful broadcast acoustic boost that cuts through any mix without clipping.
-        """
-        if vol <= 0.001:
-            return 0.0
-        v = max(0.0, min(2.0, float(vol)))
-        if is_boosted:
-            if v <= 1.0:
-                return round(0.30 * (v ** 1.3), 4)
-            else:
-                t = v - 1.0
-                return round(min(1.0, 0.30 + 0.70 * (t ** 1.15)), 4)
-        else:
-            return min(1.0, v * 0.5) if v <= 1.0 else min(1.0, 0.5 + 0.5 * (v - 1.0))
-
-    def _switch_track_source(self, player: QMediaPlayer, path_attr: str, target_path: str):
-        """Seamlessly switch an audio track's source file without dropping position or playback."""
-        if getattr(self, path_attr, None) == target_path:
-            return
-        pos = self._player.position()
-        was_playing = (self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState)
-        setattr(self, path_attr, target_path)
-
-        def _on_loaded(status: QMediaPlayer.MediaStatus):
-            if status == QMediaPlayer.MediaStatus.LoadedMedia:
-                try:
-                    player.mediaStatusChanged.disconnect(_on_loaded)
-                except Exception:
-                    pass
-                player.setPosition(pos)
-                if was_playing:
-                    player.play()
-
-        player.mediaStatusChanged.connect(_on_loaded)
-        player.setSource(QUrl.fromLocalFile(target_path))
-
-    def _switch_vi_voice_source(self, target_path: str):
-        self._switch_track_source(self._vi_voice_player, "_vi_voice_path", target_path)
+        return Path(bgm_path) if bgm_path else None
 
     def _apply_stem_volumes(self):
         """
-        Apply stem volumes across all 4 independent audio tracks.
-        For tracks loaded with boosted audio:
-        - Uses psychoacoustic power curve: 100% -> 0.30 (nominal), 200% -> 1.00 (+10.5 dB boost!).
-        For raw tracks (unboosted fallback):
-        - eff = max(0.0, min(1.0, vol))
+        Apply stem volumes across all independent audio tracks in real-time.
+        Zero file reloading, zero latency, seamless 0% to 200% scaling.
         """
         vi_vol = getattr(self, "_vi_voice_vol", 1.0)
         bgm_vol = getattr(self, "_orig_bgm_vol", 0.8)
@@ -1155,33 +1185,45 @@ class VideoPlayerWidget(QWidget):
         include_orig = getattr(self, "_include_orig_voice", False)
         orig_voice_vol = getattr(self, "_orig_voice_vol", 0.0) if include_orig else 0.0
 
-        vi_is_boosted = bool(self._vi_voice_path and "boosted_200_v2" in self._vi_voice_path)
-        eff_vi = self._scale_volume_psychoacoustic(vi_vol, vi_is_boosted)
+        # Vietnamese voice volume handling:
+        # Playing headroom-scaled voice (+20dB boost factor = 10.0):
+        # slider 100% -> volume = 0.10 (100% exact original TTS volume, 0.0 dB diff)
+        # slider 200% -> volume = 1.00 (+20.0 dB boost)
+        # slider 0%   -> volume = 0.00
+        vol_100 = 0.10
+        has_headroom = bool(getattr(self, "_vi_voice_path", None) and "headroom" in str(self._vi_voice_path))
 
-        bgm_is_boosted = bool(self._orig_bgm_path and "boosted_200_v2" in self._orig_bgm_path)
-        eff_bgm = self._scale_volume_psychoacoustic(bgm_vol, bgm_is_boosted)
-
-        custom_is_boosted = bool(self._custom_bgm_path and "boosted_200_v2" in self._custom_bgm_path)
-        eff_custom = self._scale_volume_psychoacoustic(custom_vol, custom_is_boosted)
-
-        orig_voice_is_boosted = bool(self._orig_voice_path and "boosted_200_v2" in self._orig_voice_path)
-        eff_orig_voice = self._scale_volume_psychoacoustic(orig_voice_vol, orig_voice_is_boosted)
+        if has_headroom:
+            if vi_vol <= 1.0:
+                eff_vi = max(0.0, vi_vol * vol_100)
+            else:
+                gain_db = (vi_vol - 1.0) * 20.0
+                eff_vi = min(1.0, vol_100 * (10.0 ** (gain_db / 20.0)))
+        else:
+            eff_vi = max(0.0, min(1.0, vi_vol))
 
         self._vi_voice_audio.setVolume(eff_vi)
         self._vi_voice_audio.setMuted(eff_vi <= 0.001)
 
+        # BGM volume
+        eff_bgm = max(0.0, min(1.0, bgm_vol))
         self._orig_bgm_audio.setVolume(eff_bgm)
         self._orig_bgm_audio.setMuted(eff_bgm <= 0.001)
 
+        # Custom BGM
+        eff_custom = max(0.0, min(1.0, custom_vol))
         self._custom_bgm_audio.setVolume(eff_custom)
         self._custom_bgm_audio.setMuted(eff_custom <= 0.001 or not self._custom_bgm_path)
 
+        # Original Voice
+        eff_orig_voice = max(0.0, min(1.0, orig_voice_vol))
         self._orig_voice_audio.setVolume(eff_orig_voice)
         self._orig_voice_audio.setMuted(eff_orig_voice <= 0.001 or not include_orig)
 
     def set_vi_voice_volume(self, volume: float):
         """Live adjust Vietnamese voice dubbing volume (supports 0.0 to 2.0 / up to 200%)."""
         self._vi_voice_vol = max(0.0, min(2.0, float(volume)))
+        self._apply_stem_volumes()
         self._apply_stem_volumes()
 
     def set_orig_bgm_volume(self, volume: float):
@@ -1540,6 +1582,7 @@ class VideoPlayerWidget(QWidget):
         if self._overlay_style is not None:
             self._overlay_style["pos_y_pct"] = pos_y_pct
 
+        self._reposition_overlay()
         self.subtitle_dragged.emit({
             "pos_y_pct": pos_y_pct,
             "box_width_pct": (self._overlay_style or {}).get("box_width_pct", 85),
@@ -1570,85 +1613,29 @@ class VideoPlayerWidget(QWidget):
         native_w = getattr(self, "_video_native_w", 1280) or 1280
         native_h = getattr(self, "_video_native_h", 720) or 720
 
-        # Video resolution scale relative to reference 720p height (identical to ass.py)
-        ref_h = 720.0
-        video_scale = max(native_h, 360) / ref_h
+        from dubstudio.subtitles.ass import compute_subtitle_geometry
+        geo = compute_subtitle_geometry(
+            text=self._overlay_text,
+            style=self._overlay_style,
+            video_w=native_w,
+            video_h=native_h,
+        )
 
-        # Scale factor from native video coordinate to screen display coordinate
-        disp_scale = disp_h / float(native_h)
-        total_scale = video_scale * disp_scale
+        sx = disp_w / float(native_w)
+        sy = disp_h / float(native_h)
 
-        # Font pixel size strictly 1:1 with exported video (ass_font_size * disp_scale)
-        font_size_setting = float((self._overlay_style or {}).get("font_size", 24) or 24)
-        native_font_size = max(12, int(round(font_size_setting * video_scale)))
-        scaled_font_px = max(10, int(round(native_font_size * disp_scale)))
+        x = int(round(disp_x + geo.box_left * sx))
+        y = int(round(disp_y + geo.box_top * sy))
+        w = max(1, int(round(geo.box_w * sx)))
+        h = max(1, int(round(geo.box_h * sy)))
 
-        font_name = (self._overlay_style or {}).get("font_name", "Arial")
-        font = QFont(font_name)
-        font.setPixelSize(scaled_font_px)
-        font.setBold(True)
-        fm = QFontMetrics(font)
-
-        # Bounding box width constrained by box_width_pct (default 85%)
-        box_width_pct = float((self._overlay_style or {}).get("box_width_pct", 85) or 85)
-        native_box_w = max(80, min(int(round(native_w * (box_width_pct / 100.0))), native_w))
-        w = max(40, int(round(native_box_w * disp_scale)))
-
-        text_align = (self._overlay_style or {}).get("text_align", "center")
-        align_flag = Qt.AlignmentFlag.AlignCenter
-        if text_align == "left":
-            align_flag = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        elif text_align == "right":
-            align_flag = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        flags = align_flag | Qt.TextFlag.TextWordWrap
-
-        # Compute needed height based on word-wrapped text and adjustable padding
-        pad_x_setting = float((self._overlay_style or {}).get("box_padding_x", 14) or 14)
-        pad_y_setting = float((self._overlay_style or {}).get("box_padding_y", 8) or 8)
-        native_pad_x = max(4, int(round(pad_x_setting * video_scale)))
-        native_pad_y = max(2, int(round(pad_y_setting * video_scale)))
-        pad_x = max(2, int(round(native_pad_x * disp_scale)))
-        pad_y = max(1, int(round(native_pad_y * disp_scale)))
-
-        text_rect_needed = fm.boundingRect(QRect(0, 0, max(40, w - pad_x * 2), 2000), flags, self._overlay_text)
-        h = max(int(round(20 * total_scale)), text_rect_needed.height() + pad_y * 2)
-
-        # Align horizontally within active video frame
-        if text_align == "left":
-            x = int(disp_x + 10 * total_scale)
-        elif text_align == "right":
-            x = int(disp_x + disp_w - w - 10 * total_scale)
-        else:
-            x = int(disp_x + (disp_w - w) / 2.0)
-
-        # Vertical position relative to active video frame
-        if (self._overlay_style or {}).get("pos_y_pct") is not None:
-            pct = float(self._overlay_style["pos_y_pct"])
-            y = int(round(disp_y + (pct / 100.0) * disp_h))
-            y = max(int(disp_y), min(int(disp_y + disp_h - h), y))
-        elif getattr(self, "_pinned_pos_ratio", None) is not None:
-            y = int(round(disp_y + self._pinned_pos_ratio * disp_h))
-            y = max(int(disp_y), min(int(disp_y + disp_h - h), y))
-        else:
-            pos = (self._overlay_style or {}).get("position", "bottom")
-            margin_v_setting = float((self._overlay_style or {}).get("margin_v", 35) or 35)
-            scaled_margin_v = max(2, int(round(margin_v_setting * total_scale)))
-            if pos == "top":
-                y = int(disp_y + scaled_margin_v)
-            elif pos == "center":
-                y = int(disp_y + (disp_h - h) / 2.0)
-            else:  # bottom
-                y = int(disp_y + disp_h - h - scaled_margin_v)
-
-        # Update overlay styling & dimensions
         if self._sub_overlay.width() != w or self._sub_overlay.height() != h:
             self._sub_overlay.setFixedSize(w, h)
-        self._sub_overlay.set_text_and_style(self._overlay_text, self._overlay_style, scaled_font_px, total_scale)
+        self._sub_overlay.set_geometry_data(geo, self._overlay_style)
 
         if hasattr(self, "_proxy") and self._proxy:
             cur_pos = self._proxy.pos()
-            # Only update proxy coordinates if actually shifted to avoid unnecessary UI jitter
-            if abs(cur_pos.x() - x) >= 1.0 or abs(cur_pos.y() - y) >= 1.0:
+            if abs(cur_pos.x() - x) >= 0.5 or abs(cur_pos.y() - y) >= 0.5:
                 self._proxy.setPos(x, y)
 
     def resizeEvent(self, event):
