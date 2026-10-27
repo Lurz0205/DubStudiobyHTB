@@ -40,7 +40,7 @@ def test_v2_frontend_assets_served(client):
 
 def test_v2_desktop_bridge_interface():
     """Verify DesktopAPIBridge has all expected window control & in-memory RPC methods."""
-    from start_app_v2 import DesktopAPIBridge, find_free_port
+    from start_app import DesktopAPIBridge, find_free_port
     
     # 1. Test dynamic free port acquisition (Zero Hardcoded Port)
     port = find_free_port()

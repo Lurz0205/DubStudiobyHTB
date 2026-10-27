@@ -2,7 +2,7 @@
 import math
 import pytest
 from pathlib import Path
-from start_app_v2 import DesktopAPIBridge, find_free_port
+from start_app import DesktopAPIBridge, find_free_port
 
 
 def test_dynamic_port_allocation_no_hardcoded_8765():

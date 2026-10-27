@@ -4,7 +4,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import threading
 import time
-from start_app_v2 import run_fastapi_server, find_free_port
+from start_app import run_fastapi_server, find_free_port
 import webview
 
 port = find_free_port()

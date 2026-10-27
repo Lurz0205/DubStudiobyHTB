@@ -2,8 +2,8 @@
 
 - **Mục tiêu phát hành:** `v2.0.1`
 - **Phiên bản gốc đối chiếu:** `v2.0.0`
-- **Thời gian kiểm toán:** `2026-10-27 19:45:11`
-- **Tổng số file thay đổi:** `12` (10 sửa đổi, 1 thêm mới, 1 đã xóa)
+- **Thời gian kiểm toán:** `2026-10-27 19:55:28`
+- **Tổng số file thay đổi:** `19` (15 sửa đổi, 1 thêm mới, 3 đã xóa)
 
 ---
 
@@ -20,9 +20,16 @@
 | **Modified** | `frontend/src/App.tsx` | `722279c` | `4e06a17` |
 | **Modified** | `frontend/src/components/video/WYSIWYGPlayer.tsx` | `3a1d3ee` | `ce890c8` |
 | **Modified** | `scripts/audit_release_diff.py` | `ce94d30` | `50e6496` |
+| **Modified** | `scripts/inspect_ui.py` | `6f7be99` | `c67220e` |
+| **Modified** | `start.bat` | `ebfecfc` | `162fc34` |
 | **Modified** | `start_app.py` | `67933f3` | `0063946` |
+| **Modified** | `tests/test_css_lock.py` | `fa13a19` | `e0decd3` |
+| **Modified** | `tests/test_v2_frontend_bridge.py` | `487e319` | `19394b3` |
+| **Modified** | `tests/test_v2_full_pipeline_and_wysiwyg.py` | `4de58dd` | `dfcb352` |
 | **Added** | `tests/test_v201_bugfixes.py` | *N/A* | `2602753` |
 | **Deleted** | `RELEASE_AUDIT.md` | `a5c778b` | *N/A* |
+| **Deleted** | `scripts/upload_to_github.py` | `9561ac8` | *N/A* |
+| **Deleted** | `start_app_v2.py` | `67933f3` | *N/A* |
 
 ---
 
@@ -32,3 +39,4 @@
 - [`9070cca`] Release v2.0.1: Export Subtitle Burn Fix, BGM Real-time Slider Sync (100% Default), and Project Subtitle Status Fix
 - [`1f5dad8`] Release v2.0.1: Export Subtitle Burn Fix, BGM Real-time Slider Sync (100% Default), and Project Subtitle Status Fix
 - [`a129a8b`] Release v2.0.1: Export Subtitle Burn Fix, BGM Real-time Slider Sync (100% Default), and Project Subtitle Status Fix
+- [`9c679d1`] Release v2.0.1: Export Subtitle Burn Fix, BGM Real-time Slider Sync (100% Default), and Project Subtitle Status Fix

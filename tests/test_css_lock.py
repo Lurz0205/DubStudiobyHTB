@@ -1,7 +1,7 @@
 from pathlib import Path
 from fastapi.testclient import TestClient
 from dubstudio.api.app import app
-from start_app_v2 import wait_for_server_ready
+from start_app import wait_for_server_ready
 import pytest
 
 

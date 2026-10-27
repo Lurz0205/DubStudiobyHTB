@@ -19,6 +19,6 @@ if not exist ".venv\Scripts\python.exe" (
     exit /b 1
 )
 
-echo Dang khoi dong ung dung DubStudio v2.0...
-start "" ".venv\Scripts\python.exe" start_app_v2.py
+echo Dang khoi dong ung dung DubStudio v2...
+start "" ".venv\Scripts\python.exe" start_app.py
 exit /b 0
