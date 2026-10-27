@@ -709,9 +709,16 @@ def run(job: JobContext, cfg: AppConfig) -> None:
     translated_items = auto_split_all_units(translated_items, target_n=target_n, analysis=analysis_data)
     _persist_disk(translated_items)
 
-    if using_units and segments_file.exists():
-        with open(segments_file, "r", encoding="utf-8") as sf:
-            seg_data = json.load(sf)
+    if using_units:
+        seg_data = {"version": "1.0", "segments": []}
+        if segments_file.exists():
+            try:
+                with open(segments_file, "r", encoding="utf-8") as sf:
+                    parsed = json.load(sf)
+                    if isinstance(parsed, dict):
+                        seg_data = parsed
+            except Exception:
+                pass
         seg_data["segments"] = translated_items
         seg_data["translation_style"] = style
         with open(segments_file, "w", encoding="utf-8") as sf:

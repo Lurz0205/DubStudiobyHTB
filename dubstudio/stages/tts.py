@@ -36,11 +36,17 @@ def run(job: JobContext, cfg: AppConfig) -> None:
         except Exception:
             pass
 
-    male_voice = conf.get("default_male_voice") or conf.get("voice_male") or cfg.tts.default_male_voice
-    female_voice = conf.get("default_female_voice") or conf.get("voice_female") or cfg.tts.default_female_voice
+    from dubstudio.tts.base import clean_voice_name, MALE_VOICES, FEMALE_VOICES
+
+    male_voice = clean_voice_name(conf.get("default_male_voice") or conf.get("voice_male") or cfg.tts.default_male_voice, "Minh Đức")
+    female_voice = clean_voice_name(conf.get("default_female_voice") or conf.get("voice_female") or cfg.tts.default_female_voice, "Quỳnh Anh")
     detect_gender = bool(conf.get("detect_gender", False))
     single_choice = conf.get("single_voice_gender", "male")
-    fallback_single_voice = female_voice if single_choice == "female" else male_voice
+    single_voice_override = conf.get("single_voice")
+    if single_voice_override:
+        fallback_single_voice = clean_voice_name(single_voice_override, male_voice)
+    else:
+        fallback_single_voice = female_voice if single_choice == "female" else male_voice
 
     import hashlib
 
@@ -48,21 +54,39 @@ def run(job: JobContext, cfg: AppConfig) -> None:
         s = f"{text.strip()}|{voice.strip()}|{float(speed):.2f}"
         return hashlib.md5(s.encode("utf-8")).hexdigest()[:12]
 
-    from dubstudio.tts.base import MALE_VOICES, FEMALE_VOICES
-
     # Evaluate which segments are needed and which are already clean vs dirty
     needed_segs = []
     dirty_segs = []
     for s in segments:
-        txt = (s.get("tts_text") or s.get("vi_text", "")).strip()
+        if s.get("mute_tts") or s.get("muted_tts"):
+            continue
+        txt = (s.get("tts_text") or s.get("vi_text", "") or s.get("text", "")).strip()
         if not txt:
             continue
-        v_choice = s.get("voice")
-        if not v_choice:
+        # If user explicitly customized this segment's voice in sentence editor, preserve it
+        if s.get("user_edited_voice") or s.get("voice_custom"):
+            v_choice = clean_voice_name(s.get("voice") or fallback_single_voice, fallback_single_voice)
+        else:
             if detect_gender:
                 v_choice = male_voice if s.get("gender") == "male" else female_voice
             else:
                 v_choice = fallback_single_voice
+        v_choice = clean_voice_name(v_choice, fallback_single_voice)
+
+        # Invalidate old TTS cache if voice changed from previous assignment
+        old_voice = clean_voice_name(s.get("voice", ""), "")
+        if old_voice and old_voice != v_choice:
+            s["tts_hash"] = None
+            s.pop("tts_file", None)
+            s.pop("tts_dur", None)
+            s["has_tts"] = False
+            wav_file = tts_dir / f"{s['id']:04d}.wav"
+            if wav_file.exists():
+                try:
+                    wav_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
         s["voice"] = v_choice
         sp = float(s.get("speed", 1.0) or 1.0)
         expected_hash = _calc_seg_hash(txt, v_choice, sp)
@@ -70,9 +94,14 @@ def run(job: JobContext, cfg: AppConfig) -> None:
 
         needed_segs.append(s)
         # Check if wav exists, is valid, and matches the content hash (either explicit speed or base 1.0)
-        is_clean = wav_file.exists() and wav_file.stat().st_size > 500 and (
-            s.get("tts_hash") == expected_hash
-            or s.get("tts_hash") == _calc_seg_hash(txt, v_choice, 1.0)
+        is_clean = (
+            wav_file.exists()
+            and wav_file.stat().st_size > 500
+            and bool(s.get("tts_hash"))
+            and (
+                s.get("tts_hash") == expected_hash
+                or s.get("tts_hash") == _calc_seg_hash(txt, v_choice, 1.0)
+            )
         )
         if not is_clean:
             dirty_segs.append((s, txt, v_choice, sp, expected_hash))
@@ -177,6 +206,7 @@ def run(job: JobContext, cfg: AppConfig) -> None:
             continue
 
         text, voice_choice, speed, exp_hash = dirty_dict[seg_id]
+        voice_choice = clean_voice_name(voice_choice, male_voice)
         seg["voice"] = voice_choice
         seg["speed"] = speed
 

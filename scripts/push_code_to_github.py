@@ -2,6 +2,12 @@
 import base64
 import hashlib
 import os
+import sys
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 import time
 from pathlib import Path
 import dotenv
@@ -50,9 +56,9 @@ if custom_msg:
     commit_msg = custom_msg
 elif requested_tag:
     tag_clean = requested_tag if requested_tag.startswith("v") else f"v{requested_tag}"
-    commit_msg = f"Release {tag_clean}: +20dB Voice Boost, WYSIWYG 9:16 Subtitles, and Unified Export"
+    commit_msg = f"Release {tag_clean}: Next-Gen Studio UI (React/Tailwind + PyWebView), Dynamic Ports, Zero PyQt6, and Syllable-Aware LLM Fit"
 else:
-    commit_msg = f"Update DubStudio v{APP_VERSION}: Voice volume +20dB boost and UI improvements"
+    commit_msg = f"Update DubStudio v{APP_VERSION}: Next-Gen Studio UI, Dynamic Ports, and Syllable-Aware LLM Fit"
 
 # 0a. Pre-Release Cleanup on Remote:
 # ONLY if a new release tag is requested (--tag vX.X.X):
@@ -106,7 +112,7 @@ if tree_fetch_resp.status_code == 200:
             remote_files_map[item["path"]] = item["sha"]
 
 # 3. Collect ALL local project files and calculate Git SHA-1 for every file
-excluded_dirs = {'.venv', 'models', 'workspace', 'out', 'samples', '__pycache__', 'dist', 'build', 'bin', '.pytest_cache', '.git'}
+excluded_dirs = {'.venv', 'models', 'workspace', 'out', 'samples', '__pycache__', 'dist', 'build', 'bin', '.pytest_cache', '.git', 'node_modules'}
 excluded_files = {'.env', 'scratch_analyze.py', 'release_manifest.json'}
 
 def calc_git_sha(content_bytes: bytes) -> str:

@@ -25,6 +25,8 @@ def emit_event(
     msg: str,
     level: str = "info",
     extra: Optional[Dict[str, Any]] = None,
+    data: Optional[Dict[str, Any]] = None,
+    **kwargs,
 ) -> None:
     """Emit a JSON-lines formatted progress event to stdout and in-process listeners."""
     event_data = {
@@ -35,6 +37,10 @@ def emit_event(
     }
     if extra:
         event_data.update(extra)
+    if data:
+        event_data["data"] = data
+    if kwargs:
+        event_data.update(kwargs)
 
     # Use sys.stdout directly with flush for real-time consumption
     payload = json.dumps(event_data, ensure_ascii=False) + "\n"

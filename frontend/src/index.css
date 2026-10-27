@@ -1,0 +1,179 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-main: #121214;
+    --bg-surface: #18181B;
+    --bg-surface-elevated: #202024;
+    --border-subtle: rgba(255, 255, 255, 0.07);
+    --border-muted: rgba(255, 255, 255, 0.12);
+    --text-primary: #F4F4F5;
+    --text-secondary: #A1A1AA;
+    --text-muted: #71717A;
+  }
+
+  /* 1. Universal Single Font Family across all elements & components */
+  *, html, body, button, input, select, textarea, span, p, h1, h2, h3, h4, div, label {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+  }
+
+  body {
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+  }
+
+  /* Studio Matte Scrollbars */
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #27272A;
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3F3F46;
+  }
+
+  /* User selection & Disable browser spellcheck red squiggles */
+  input, textarea, [contenteditable="true"] {
+    user-select: text;
+    spellcheck: false;
+  }
+}
+
+/* Frameless Window Drag Regions */
+.app-drag {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.app-no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* Clean Matte Range Slider */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: #27272A;
+  border-radius: 9999px;
+  height: 4px;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  transition: transform 0.1s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+
+input[type="range"]::-webkit-slider-thumb:active {
+  transform: scale(0.95);
+  background: #E4E4E7;
+}
+
+/* -------------------------------------------------------------
+   Micro-Interactions & GPU-Accelerated Motion Polish (60fps)
+   ------------------------------------------------------------- */
+
+/* Page & Tab View Transitions */
+@keyframes viewFadeSlide {
+  0% {
+    opacity: 0;
+    transform: translateY(4px) scale(0.996);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.view-transition {
+  animation: viewFadeSlide 190ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  will-change: transform, opacity;
+}
+
+/* Modal & Popup Scale In */
+@keyframes modalPopIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.96) translateY(5px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Modal & Popup Scale Out (Smooth Exit Motion) */
+@keyframes modalPopOut {
+  0% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.96) translateY(5px);
+  }
+}
+
+.modal-pop {
+  animation: modalPopIn 200ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.modal-pop-exit {
+  animation: modalPopOut 160ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  will-change: transform, opacity;
+}
+
+/* Context Menu & Floating Dropdown Pop */
+@keyframes menuScaleIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.menu-pop {
+  animation: menuScaleIn 140ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  transform-origin: top left;
+  will-change: transform, opacity;
+}
+
+/* Micro-interaction Button Press & Transitions */
+button {
+  transition: transform 0.12s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.975);
+}
+
+/* Smooth Card Hover & Active Highlights */
+.interactive-card {
+  transition: transform 0.14s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.interactive-card:active {
+  transform: scale(0.99);
+}

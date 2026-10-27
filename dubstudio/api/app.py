@@ -80,7 +80,6 @@ async def global_exception_handler(request, exc: Exception):
     )
 
 
-@app.get("/")
 @app.get("/api/health")
 def healthcheck():
     """Healthcheck endpoint for subprocesses and clients."""
@@ -134,6 +133,8 @@ def _quick_rebuild_voice_track(job_id: str) -> None:
         total_samples = int(video_dur * sr) + sr
         voice_track = np.zeros(total_samples, dtype=np.float32)
 
+        seg_lookup = {s.get("id"): s for s in segments if s.get("id") is not None}
+
         # Check fit_plan.json first
         fit_plan_file = ws_dir / "fit_plan.json"
         items = []
@@ -141,19 +142,44 @@ def _quick_rebuild_voice_track(job_id: str) -> None:
             try:
                 raw_fp = json.loads(fit_plan_file.read_text(encoding="utf-8"))
                 if isinstance(raw_fp, list):
-                    items = raw_fp
+                    items = [
+                        it for it in raw_fp
+                        if not (
+                            it.get("muted")
+                            or seg_lookup.get(it.get("id"), {}).get("mute_tts")
+                            or seg_lookup.get(it.get("id"), {}).get("muted_tts")
+                            or seg_lookup.get(it.get("id"), {}).get("keep_original")
+                        )
+                    ]
             except Exception:
                 items = []
 
         if not items:
             for s in segments:
-                if s.get("mute_tts") or s.get("keep_original"):
+                if s.get("mute_tts") or s.get("muted_tts") or s.get("keep_original"):
                     continue
                 items.append({
                     "id": s["id"],
                     "start": float(s.get("voice_start", s.get("start", 0.0))),
                     "wav": s.get("tts_file") or f"tts/{s['id']:04d}.wav",
                 })
+
+        video_dur = 0.0
+        state_file = ws_dir / "state.json"
+        if state_file.exists():
+            try:
+                st_data = json.loads(state_file.read_text(encoding="utf-8"))
+                video_dur = float(st_data.get("video", {}).get("duration", 0.0) or 0.0)
+            except Exception:
+                pass
+        if video_dur <= 0.0:
+            probe_file = ws_dir / "probe.json"
+            if probe_file.exists():
+                try:
+                    p_data = json.loads(probe_file.read_text(encoding="utf-8"))
+                    video_dur = float(p_data.get("format", {}).get("duration", 0.0) or 0.0)
+                except Exception:
+                    pass
 
         items.sort(key=lambda x: float(x.get("start", 0.0)))
         for i, it in enumerate(items):
@@ -176,10 +202,20 @@ def _quick_rebuild_voice_track(job_id: str) -> None:
                     ).astype(np.float32)
                 st = float(it.get("start", 0.0))
 
-                # Strict anti-overlap ("chống đè giọng") enforcement
+                # Strict anti-overlap ("chống đè giọng") enforcement: allow max 0.25s overlap
                 if i + 1 < len(items):
                     next_st = float(items[i + 1].get("start", st + 1.0))
-                    max_allowed_dur = max(0.1, next_st - st + 0.08)
+                    max_allowed_dur = max(0.1, next_st - st + 0.25)
+                    curr_dur = len(audio_data) / sr
+                    if curr_dur > max_allowed_dur:
+                        max_samples = int(max_allowed_dur * sr)
+                        audio_data = audio_data[:max_samples]
+                        fade_samples = min(int(0.05 * sr), len(audio_data))
+                        if fade_samples > 0:
+                            audio_data[-fade_samples:] *= np.linspace(1.0, 0.0, fade_samples, dtype=np.float32)
+                elif video_dur > 0 and st < video_dur:
+                    # Last sentence cannot exceed video duration
+                    max_allowed_dur = max(0.1, video_dur - st)
                     curr_dur = len(audio_data) / sr
                     if curr_dur > max_allowed_dur:
                         max_samples = int(max_allowed_dur * sr)
@@ -196,14 +232,35 @@ def _quick_rebuild_voice_track(job_id: str) -> None:
                 voice_track[start_sample:end_sample] += audio_data
             except Exception:
                 continue
+
+        if video_dur > 0:
+            max_track_samples = int((video_dur + 0.05) * sr)
+            if len(voice_track) > max_track_samples:
+                voice_track = voice_track[:max_track_samples]
         peak = np.max(np.abs(voice_track)) if len(voice_track) > 0 else 0.0
         if peak > 0.95:
             voice_track = voice_track * (0.95 / peak)
+
+        # Atomic writes via .tmp and os.replace to prevent partial reads by webview / FileResponse
+        import os
         out_file = ws_dir / "voice_track.wav"
-        sf.write(str(out_file.resolve()), voice_track, sr, subtype="PCM_16")
-        out_raw = ws_dir / "voice_raw.wav"
+        out_tmp = ws_dir / "voice_track.wav.tmp"
         try:
-            sf.write(str(out_raw.resolve()), voice_track, sr, subtype="PCM_16")
+            sf.write(str(out_tmp.resolve()), voice_track, sr, subtype="PCM_16")
+            os.replace(str(out_tmp.resolve()), str(out_file.resolve()))
+        except Exception:
+            try:
+                sf.write(str(out_file.resolve()), voice_track, sr, subtype="PCM_16")
+            except Exception:
+                pass
+
+        out_raw = ws_dir / "voice_raw.wav"
+        out_raw_tmp = ws_dir / "voice_raw.wav.tmp"
+        try:
+            sf.write(str(out_raw_tmp.resolve()), voice_track, sr, subtype="PCM_16")
+            os.replace(str(out_raw_tmp.resolve()), str(out_raw.resolve()))
+        except Exception:
+            pass
         except Exception:
             pass
     except Exception:
@@ -544,6 +601,7 @@ def _run_pipeline_worker(job_id: str, video_path: Path, subtitles_only: bool = F
                             float(evt["pct"]),
                             evt.get("msg", ""),
                             evt.get("level", "info"),
+                            data=evt.get("data"),
                         )
                 except Exception:
                     pass
@@ -1830,11 +1888,31 @@ def preview_voice_api(voice: str = "Minh Đức"):
     """Generate or retrieve a short 2s audio preview for any selected voice."""
     cfg = AppConfig.load()
     from dubstudio.paths import get_out_dir
+    import shutil
     preview_dir = get_out_dir() / "voice_previews"
     preview_dir.mkdir(parents=True, exist_ok=True)
     wav_path = preview_dir / f"{voice}.wav"
 
-    if not wav_path.exists():
+    # Check pre-bundled locations first to guarantee 0ms instant playback
+    if not wav_path.exists() or wav_path.stat().st_size < 1024:
+        candidates = [
+            Path("out/voice_previews") / f"{voice}.wav",
+            Path(__file__).resolve().parent.parent.parent / "out" / "voice_previews" / f"{voice}.wav",
+            Path(__file__).resolve().parent.parent / "resources" / "voice_previews" / f"{voice}.wav",
+            Path(sys.executable).resolve().parent / "out" / "voice_previews" / f"{voice}.wav",
+            Path(sys.executable).resolve().parent / "_internal" / "out" / "voice_previews" / f"{voice}.wav",
+            Path(sys.executable).resolve().parent / "_internal" / "dubstudio" / "resources" / "voice_previews" / f"{voice}.wav",
+        ]
+        for cand in candidates:
+            if cand.exists() and cand.stat().st_size >= 1024:
+                try:
+                    shutil.copy2(cand, wav_path)
+                    break
+                except Exception:
+                    wav_path = cand
+                    break
+
+    if not wav_path.exists() or wav_path.stat().st_size < 1024:
         sample_text = f"Xin chào, tôi là giọng đọc {voice} của DubStudio."
         tts_payload = {
             "text": sample_text,
@@ -1875,7 +1953,8 @@ def preview_voice_api(voice: str = "Minh Đức"):
 def get_settings():
     """Get current configuration (API keys are masked for security)."""
     from dotenv import load_dotenv
-    load_dotenv(override=True)
+    from dubstudio.paths import get_env_file
+    load_dotenv(get_env_file(), override=True)
 
     cfg = AppConfig.load()
     raw_key = os.getenv("GEMINI_API_KEY", "") or cfg.gemini_api_key or ""
@@ -2511,11 +2590,99 @@ def edit_video_api(req: EditVideoRequest):
 
 
 # --- Mount static assets & media folders ---
+def _resolve_frontend_dist() -> Path:
+    candidates = [
+        Path(__file__).resolve().parent.parent.parent / "frontend" / "dist",
+        Path(getattr(sys, "_MEIPASS", "")) / "frontend" / "dist",
+        Path(sys.executable).parent / "_internal" / "frontend" / "dist",
+        Path(sys.executable).parent / "frontend" / "dist",
+    ]
+    for c in candidates:
+        if c.exists() and (c / "index.html").exists():
+            return c
+    return candidates[0]
+
+
+class CORSStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
+
+frontend_dist = _resolve_frontend_dist()
+if (frontend_dist / "assets").exists():
+    app.mount("/assets", CORSStaticFiles(directory=str(frontend_dist / "assets")), name="frontend_assets")
+
 static_dir = Path(__file__).resolve().parent / "static"
 static_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-from dubstudio.paths import get_workspace_dir, get_out_dir
+from dubstudio.paths import get_workspace_dir, get_out_dir, resolve_job_workspace
+
+@app.get("/api/local-file")
+def get_local_file(path: str):
+    """Serve any local file for preview (logo images, custom BGM audio)."""
+    p = Path(path)
+    if not p.exists() or not p.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    media_type = None
+    ext = p.suffix.lower()
+    if ext in (".png",):
+        media_type = "image/png"
+    elif ext in (".jpg", ".jpeg"):
+        media_type = "image/jpeg"
+    elif ext in (".webp",):
+        media_type = "image/webp"
+    elif ext in (".bmp",):
+        media_type = "image/bmp"
+    elif ext in (".svg",):
+        media_type = "image/svg+xml"
+    elif ext in (".wav",):
+        media_type = "audio/wav"
+    elif ext in (".mp3",):
+        media_type = "audio/mpeg"
+    elif ext in (".mp4", ".m4v"):
+        media_type = "video/mp4"
+    return FileResponse(str(p.resolve()), media_type=media_type)
+
+
+@app.get("/media/workspace/{job_id}/{file_path:path}")
+def serve_workspace_media(job_id: str, file_path: str):
+    """Dynamically serve files from job workspace regardless of workspace storage root."""
+    try:
+        ws = resolve_job_workspace(job_id)
+        target = ws / file_path
+        if not target.exists() and file_path == "voice_track.wav":
+            import time
+            for _ in range(5):
+                time.sleep(0.03)
+                if target.exists():
+                    break
+        if target.exists() and target.is_file():
+            # Determine appropriate media type
+            ext = target.suffix.lower()
+            media_type = None
+            if ext in (".mp4", ".m4v"):
+                media_type = "video/mp4"
+            elif ext in (".wav",):
+                media_type = "audio/wav"
+            elif ext in (".mp3",):
+                media_type = "audio/mpeg"
+            elif ext in (".json",):
+                media_type = "application/json"
+            elif ext in (".ass", ".srt"):
+                media_type = "text/plain"
+            return FileResponse(str(target.resolve()), media_type=media_type, headers={"Cache-Control": "no-cache"})
+    except Exception as e:
+        _api_logger.warning("Error serving workspace media %s/%s: %s", job_id, file_path, e)
+    raise HTTPException(status_code=404, detail="File not found in workspace")
+
 workspace_dir = get_workspace_dir()
 workspace_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/media/workspace", StaticFiles(directory=str(workspace_dir)), name="media_workspace")
@@ -2531,8 +2698,26 @@ app.mount("/media/samples", StaticFiles(directory=str(samples_dir)), name="media
 
 @app.get("/")
 def index():
-    """Serve the single-page application."""
+    """Serve the single-page application (prefer modern frontend/dist, fallback to static)."""
+    if (frontend_dist / "index.html").exists():
+        return FileResponse(
+            frontend_dist / "index.html",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+                "Access-Control-Allow-Origin": "*",
+            }
+        )
     index_file = static_dir / "index.html"
     if index_file.exists():
-        return FileResponse(index_file)
+        return FileResponse(
+            index_file,
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
     return JSONResponse({"message": "DubStudio API Running. UI not loaded yet."})

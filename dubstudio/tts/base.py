@@ -1,4 +1,5 @@
 """Base interface and voice definitions for TTS engines."""
+from typing import Any
 
 MALE_VOICES = {
     "Minh Đức", "Hải Đăng", "Quốc Tuấn", "Quang Sơn", "Thiện Minh",
@@ -11,12 +12,34 @@ FEMALE_VOICES = {
     "Ngọc Trân", "Ngọc Linh", "Đoan Trang", "Thục Đoan", "Mỹ Duyên", "Kim Thanh",
 }
 
+ALL_VOICES = MALE_VOICES | FEMALE_VOICES
+
+
+def clean_voice_name(voice: Any, default: str = "Minh Đức") -> str:
+    """Clean and strip descriptive tags (like '(Nam - Tự nhiên)') to match valid VieNeu voice names."""
+    if not voice:
+        return default
+    v = str(voice).strip()
+    if v in ALL_VOICES:
+        return v
+    import re
+    # Remove parenthesized phrases like (Nam - Tự nhiên) or (Nữ - Truyền cảm)
+    cleaned = re.sub(r'\(.*?\)', '', v).strip()
+    if cleaned in ALL_VOICES:
+        return cleaned
+    # Match longest substring against known voices
+    for cand in sorted(ALL_VOICES, key=len, reverse=True):
+        if cand.lower() in v.lower():
+            return cand
+    return default
+
 
 def get_voice_gender(voice_name: str) -> str:
     """Return 'female' or 'male' for known VieNeu voices, or 'unknown'."""
-    if voice_name in FEMALE_VOICES:
+    v = clean_voice_name(voice_name, "")
+    if v in FEMALE_VOICES:
         return "female"
-    if voice_name in MALE_VOICES:
+    if v in MALE_VOICES:
         return "male"
     return "unknown"
 

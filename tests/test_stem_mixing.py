@@ -1,3 +1,8 @@
+import pytest
+from pathlib import Path
+if not Path('ui').exists():
+    pytest.skip('Legacy PyQt6 v1 UI tests skipped because ui/ was decommissioned in v2.0.0', allow_module_level=True)
+
 import numpy as np
 import pytest
 import soundfile as sf
@@ -72,3 +77,51 @@ def test_boosted_tracks_generation_and_stem_volumes(tmp_path, qapp):
 
     player.set_orig_bgm_volume(2.0)
     assert abs(player._orig_bgm_audio.volume() - 1.0) < 0.01
+
+
+def test_quick_rebuild_voice_track_skips_muted_tts(tmp_path):
+    import json
+    from dubstudio.api.app import _quick_rebuild_voice_track
+    import dubstudio.paths as paths_mod
+
+    job_ws = tmp_path / "test_job_muted"
+    job_ws.mkdir()
+    tts_dir = job_ws / "tts"
+    tts_dir.mkdir()
+
+    sr = 24000
+    dur = 0.5
+    t = np.linspace(0, dur, int(sr * dur), endpoint=False)
+    sine = (0.5 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+
+    sf.write(str(tts_dir / "0001.wav"), sine, sr)
+    sf.write(str(tts_dir / "0002.wav"), sine, sr)
+
+    # Segment 2 is muted
+    segments = [
+        {"id": 1, "start": 0.0, "end": 0.5, "voice_start": 0.0, "mute_tts": False},
+        {"id": 2, "start": 1.0, "end": 1.5, "voice_start": 1.0, "mute_tts": True},
+    ]
+    (job_ws / "segments.json").write_text(json.dumps({"segments": segments, "video": {"duration": 2.0}}), encoding="utf-8")
+    (job_ws / "fit_plan.json").write_text(json.dumps([
+        {"id": 1, "start": 0.0, "wav": "tts/0001.wav"},
+        {"id": 2, "start": 1.0, "wav": "tts/0002.wav"},
+    ]), encoding="utf-8")
+
+    orig_resolve = paths_mod.resolve_job_workspace
+    try:
+        paths_mod.resolve_job_workspace = lambda jid: job_ws
+        _quick_rebuild_voice_track("test_job_muted")
+
+        voice_p = job_ws / "voice_track.wav"
+        assert voice_p.exists()
+        audio_data, file_sr = sf.read(str(voice_p))
+        # Segment 1 (0 to 0.5s) should have audio
+        s1_samples = audio_data[int(0.1 * sr):int(0.4 * sr)]
+        assert np.max(np.abs(s1_samples)) > 0.3
+
+        # Segment 2 (1.0 to 1.5s) was muted, so it MUST be silence!
+        s2_samples = audio_data[int(1.1 * sr):int(1.4 * sr)]
+        assert np.max(np.abs(s2_samples)) < 0.001
+    finally:
+        paths_mod.resolve_job_workspace = orig_resolve

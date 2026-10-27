@@ -493,6 +493,8 @@ def split_sentence_cues(
        compound words, and target word limits globally without fragmenting into 4-5 word orphans.
     """
     raw_text = (text or "").strip()
+    # Flatten any embedded newlines so sentences can merge or split strictly based on target_n
+    raw_text = re.sub(r'\s*\n+\s*', ' ', raw_text).strip()
     if not raw_text:
         return []
 
@@ -579,7 +581,8 @@ def auto_split_unit_cues(
             ] if len(existing_cues) > 1 else None
             return existing_cues
 
-    vi_text = str(unit.get("vi_text") or unit.get("src_text") or "").strip()
+    vi_text = str(unit.get("vi_text") or unit.get("text") or unit.get("src_text") or "").strip()
+    vi_text = re.sub(r'\s*\n+\s*', ' ', vi_text).strip()
     if not vi_text:
         return []
 

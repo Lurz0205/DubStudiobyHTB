@@ -55,3 +55,41 @@ def test_auto_split_unit_cues_force():
     res9 = auto_split_all_units(sample_segments, target_n=9, force=True)
     cues9 = res9[0].get("cues", [])
     assert len(cues9) >= 1
+
+
+def test_render_with_overlays_no_has_voice_error(tmp_path):
+    """Verify render.run constructs overlay pipeline and executes without 'has_voice' NameError."""
+    from unittest.mock import MagicMock, patch
+    from dubstudio.jobstate import JobContext
+    from dubstudio.config import AppConfig
+
+    job = JobContext(workspace_path=tmp_path, job_id="test_render_overlays")
+    cfg = AppConfig()
+
+    (tmp_path / "segments.json").write_text(
+        json.dumps({"segments": [{"id": 1, "start": 0, "end": 1, "text": "test"}]}),
+        encoding="utf-8"
+    )
+    (tmp_path / "style.json").write_text(
+        json.dumps({
+            "color_boxes": [{"x": 10, "y": 10, "w": 100, "h": 50, "color": "#000000", "enabled": True}]
+        }),
+        encoding="utf-8"
+    )
+    dummy_vid = tmp_path / "input.mp4"
+    dummy_vid.write_bytes(b"000")
+
+    with patch("dubstudio.packaging.safe_subprocess_run") as mock_run, \
+         patch("dubstudio.ffmpeg_utils.probe_file") as mock_probe, \
+         patch("dubstudio.subtitles.ass.generate_ass_subtitles") as mock_ass:
+        mock_probe.return_value = {"streams": [{"codec_type": "video", "width": 1920, "height": 1080}]}
+        def fake_ass(segs, out_file, **kw):
+            out_file.write_text("[Script Info]", encoding="utf-8")
+        mock_ass.side_effect = fake_ass
+        mock_run.return_value = MagicMock(returncode=0)
+
+        from dubstudio.stages.render import run
+        run(job, cfg, input_video=dummy_vid, force=True)
+        assert mock_run.called
+        call_cmd = mock_run.call_args[0][0]
+        assert any("overlay" in arg for arg in call_cmd)

@@ -9,6 +9,11 @@ import base64
 import hashlib
 import os
 import sys
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 import time
 from pathlib import Path
 
@@ -107,14 +112,14 @@ def find_last_release_tag(session: requests.Session, api_base: str, current_vers
         return candidates[0][1], candidates[0][2]
 
     # Default fallback
-    return "v1.1.2", ""
+    return "v1.1.3", ""
 
 
 def collect_local_files() -> Dict[str, Tuple[Path, bytes, str]]:
     """Scan local repository and return map of rel_path -> (Path, bytes, git_sha)."""
     excluded_dirs = {
         ".venv", "models", "workspace", "out", "samples", "__pycache__",
-        "dist", "build", "bin", ".pytest_cache", ".git", ".gemini"
+        "dist", "build", "bin", ".pytest_cache", ".git", ".gemini", "node_modules"
     }
     excluded_files = {
         ".env", "scratch_analyze.py", "release_manifest.json", "RELEASE_AUDIT.md"

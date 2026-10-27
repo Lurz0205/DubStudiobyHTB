@@ -1,5 +1,9 @@
+import pytest
+from pathlib import Path
+if not Path('ui').exists():
+    pytest.skip('Legacy PyQt6 v1 UI tests skipped because ui/ was decommissioned in v2.0.0', allow_module_level=True)
+
 import os
-os.environ["QT_QPA_PLATFORM"] = "offscreen"
 import pytest
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt, QPointF, QEvent

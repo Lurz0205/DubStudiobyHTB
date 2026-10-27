@@ -1,3 +1,8 @@
+import pytest
+from pathlib import Path
+if not Path('ui').exists():
+    pytest.skip('Legacy PyQt6 v1 UI tests skipped because ui/ was decommissioned in v2.0.0', allow_module_level=True)
+
 """Tests for Video Editor API payload and analyze stage data structure."""
 import pytest
 from dubstudio.api.app import EditVideoRequest

@@ -97,3 +97,23 @@ def test_generate_ass_with_pos_y_pct(tmp_path):
     # For video_height 720 and pos_y_pct 50%, box_top is 360
     assert "\\pos(80,360)" in content or ",360)" in content or ",37" in content
 
+
+def test_measure_text_box_native_gdi_no_pyqt6():
+    import subprocess
+    import sys
+
+    # Run check in a clean isolated subprocess to guarantee PyQt6 is never imported
+    cmd = [
+        sys.executable,
+        "-c",
+        (
+            "import sys; "
+            "from dubstudio.subtitles.ass import measure_text_box; "
+            "w, h = measure_text_box('Xin chào các bạn đã quay trở lại', 'Arial', 48, 12, 10, 'wrap_text', 85.0, 1080); "
+            "assert w > 100 and h > 40; "
+            "assert not any(m.startswith('PyQt6') for m in sys.modules), 'PyQt6 should not be imported'"
+        ),
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    assert res.returncode == 0, f"Subprocess failed: {res.stderr}"
+

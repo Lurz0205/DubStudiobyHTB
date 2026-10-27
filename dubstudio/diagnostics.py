@@ -278,3 +278,4 @@ def export_diagnostics_bundle(output_zip: Path | None = None) -> Path:
 
 
 export_diagnostic_zip = export_diagnostics_bundle
+export_diagnostic_bundle = export_diagnostics_bundle

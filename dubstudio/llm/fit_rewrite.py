@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import httpx
@@ -52,45 +53,88 @@ class FitRewriter:
         # Pass-specific urgency directive
         if pass_idx == 1:
             urgency_hdr = (
-                "## [LƯỢT 1 - BIÊN KỊCH LỒNG TIẾNG THOÁT Ý & CÂN BẰNG THỜI LƯỢNG]:\n"
-                "- Đối với câu direction='shorter': DỊCH THOÁT Ý CÔ ĐỌNG, viết lại câu tự nhiên, gãy gọn, độ dài trong khoảng [min_chars, max_chars] (xấp xỉ target_chars). TUYỆT ĐỐI KHÔNG CẮT CỤT LỦN làm mất tự nhiên và KHÔNG ĐƯỢC VIẾT DƯỚI min_chars để tránh bị hở khoảng lặng quá nhiều so với giọng gốc.\n"
-                "- Đối với câu direction='longer': DỊCH THOÁT Ý ĐẦY ĐỦ, thoáng đạt, tự nhiên để lấp đầy thời lượng nói trên hình (đạt khoảng target_chars, trong [min_chars, max_chars]), không bịa sự kiện mới."
+                "## [LƯỢT 1 - BIÊN KỊCH LỒNG TIẾNG THOÁT Ý & CÂN BẰNG THỜI LƯỢNG THEO SỐ TỪ]:\n"
+                "- Đối với câu direction='shorter': Ưu tiên CẤP ĐỘ 1 (Gọt tỉa vi phẫu) nếu words_to_remove <= 4, giữ nguyên 85-90% câu gốc chỉ bớt từ thừa. Nếu words_to_remove >= 5, diễn đạt lại súc tích trong dải [min_words, max_words]. Bắt buộc đếm từ trước khi trả lời và điền tts_word_count.\n"
+                "- Đối với câu direction='longer': DỊCH THOÁT Ý ĐẦY ĐỦ, thoáng đạt, tự nhiên để lấp đầy thời lượng nói trên hình (đạt khoảng target_words trong [min_words, max_words]), không bịa sự kiện mới."
             )
         elif pass_idx == 2:
             urgency_hdr = (
-                "## [LƯỢT 2 - TINH GỌN THOÁT Ý CHUẨN XÁC]: Lần trước câu vẫn hơi dài gây đè âm thanh nhẹ vào câu sau! "
-                "Hãy dùng tài năng biên kịch tìm cách diễn đạt khác thoát ý hơn, cô đọng hơn, bám sát target_chars trong dải [min_chars, max_chars]. "
-                "TUYỆT ĐỐI KHÔNG CẮT CỤT CÂU LỦNG CỦNG và KHÔNG ĐƯỢC VIẾT DƯỚI min_chars!"
+                "## [LƯỢT 2 - TINH GỌN VI PHẪU CHUẨN XÁC THEO SỐ TỪ]: Lần trước câu vẫn hơi dài gây đè âm thanh nhẹ vào câu sau! "
+                "Hãy bám sát edit_instruction, giữ nguyên khung câu và chỉ cắt bớt đúng số từ mục tiêu, đảm bảo số từ nằm chuẩn trong [min_words, max_words]. "
+                "TUYỆT ĐỐI KHÔNG CẮT CỤT CÂU LỦNG CỦNG và KHÔNG ĐƯỢC VIẾT DƯỚI min_words! Nhớ điền tts_word_count."
             )
         else:
             urgency_hdr = (
-                f"## [LƯỢT {pass_idx} - CÔ ĐỌNG THOÁT Ý TỐI ƯU]: Tối ưu hóa từ ngữ gãy gọn, súc tích nhất theo target_chars, "
-                "câu nói mạch lạc tự nhiên, không cụt lửng, không hở giọng dưới min_chars."
+                f"## [LƯỢT {pass_idx} - CÔ ĐỌNG THOÁT Ý TỐI ƯU]: Tối ưu hóa từ ngữ gãy gọn nhất theo target_words, "
+                "câu nói mạch lạc tự nhiên, không cụt lửng, không hở giọng dưới min_words. Nhớ điền tts_word_count."
             )
 
-        # Prepare payload
+        def _clean_single_line(s: Any) -> str:
+            if not s:
+                return ""
+            return re.sub(r'\s+', ' ', str(s)).strip()
+
+        # Prepare payload - strictly single-line strings without any \n or extra spaces
         payload_items = []
         for u in mismatched_units:
+            prev_str = _clean_single_line(u.get("prev_vi", ""))
+            next_str = _clean_single_line(u.get("next_vi", ""))
             ctx = []
-            if u.get("prev_vi"):
-                ctx.append(f"Liền trước: '{u['prev_vi']}'")
-            if u.get("next_vi"):
-                ctx.append(f"Liền sau: '{u['next_vi']}'")
+            if prev_str:
+                ctx.append(f"Liền trước: '{prev_str}'")
+            if next_str:
+                ctx.append(f"Liền sau: '{next_str}'")
             context_str = " | ".join(ctx) if ctx else "Ngữ cảnh hội thoại"
 
-            payload_items.append({
+            tts_clean = _clean_single_line(u.get("tts_text") or u.get("vi_text", ""))
+            curr_words = u.get("current_words")
+            if curr_words is None:
+                curr_words = len(tts_clean.split()) if tts_clean else 0
+
+            tgt_words = u.get("target_words", max(2, curr_words - 1))
+            min_w = u.get("min_words", max(2, tgt_words - 1))
+            max_w = u.get("max_words", min_w + 2)
+            direction = u.get("direction", "shorter")
+
+            words_to_remove = u.get("words_to_remove")
+            if words_to_remove is None and direction == "shorter":
+                words_to_remove = max(1, curr_words - tgt_words)
+
+            edit_instr = u.get("edit_instruction", "")
+            if not edit_instr:
+                if direction == "shorter":
+                    if words_to_remove is not None and words_to_remove <= 3:
+                        edit_instr = f"CHỈ CẦN LƯỢC BỎ ĐÚNG {words_to_remove} TỪ ĐỆM/TỪ THỪA. Giữ nguyên 85-90% câu gốc, TUYỆT ĐỐI KHÔNG tóm tắt hay viết lại toàn bộ câu!"
+                    else:
+                        edit_instr = f"Viết lại câu súc tích hơn để giảm từ {curr_words} từ xuống đúng khoảng {min_w}-{max_w} từ (mục tiêu {tgt_words} từ). Không được viết ngắn dưới {min_w} từ!"
+                else:
+                    words_to_add = u.get("words_to_add", max(1, tgt_words - curr_words))
+                    edit_instr = f"Mở rộng câu tự nhiên thêm khoảng {words_to_add} từ, tăng từ {curr_words} từ lên khoảng {min_w}-{max_w} từ (mục tiêu {tgt_words} từ). Không bịa thêm sự kiện mới!"
+
+            item_payload = {
                 "id": u["id"],
-                "zh": u.get("zh", ""),
-                "vi_text": u.get("vi_text", ""),
-                "tts_text": u.get("tts_text", ""),
+                "zh": _clean_single_line(u.get("zh", "")),
+                "vi_text": _clean_single_line(u.get("vi_text", "")),
+                "tts_text": tts_clean,
+                "current_words": curr_words,
+                "target_words": tgt_words,
+                "min_words": min_w,
+                "max_words": max_w,
                 "measured_dur": u.get("measured_dur", 0.0),
                 "max_audio_dur": u.get("max_audio_dur", 1.0),
-                "direction": u.get("direction", "shorter"),
+                "direction": direction,
+                "edit_instruction": edit_instr,
                 "min_chars": u.get("min_chars", max(8, int(u.get("target_chars", 25) * 0.85))),
                 "target_chars": u.get("target_chars", 25),
                 "max_chars": u.get("max_chars", max(10, int(u.get("target_chars", 25) * 1.10))),
                 "context": context_str,
-            })
+            }
+            if direction == "shorter":
+                item_payload["words_to_remove"] = words_to_remove
+            else:
+                item_payload["words_to_add"] = u.get("words_to_add", max(1, tgt_words - curr_words))
+
+            payload_items.append(item_payload)
 
         content_str = json.dumps(payload_items, ensure_ascii=False, indent=2)
         template_text = ""
@@ -131,10 +175,13 @@ class FitRewriter:
                     continue
                 vi_val = it.get("vi_text") or it.get("vi") or it.get("text") or it.get("shortened_vi") or ""
                 tts_val = it.get("tts_text") or it.get("tts") or it.get("spoken_text") or vi_val
+                word_cnt = it.get("tts_word_count") or it.get("word_count")
+                parsed_wc = int(word_cnt) if (word_cnt is not None and str(word_cnt).isdigit()) else len(str(tts_val).split())
                 out.append({
                     "id": int(sid),
-                    "vi_text": sanitize_spoken_vietnamese(str(vi_val).strip()),
-                    "tts_text": sanitize_spoken_vietnamese(str(tts_val).strip()),
+                    "vi_text": _clean_single_line(sanitize_spoken_vietnamese(str(vi_val).strip())),
+                    "tts_text": _clean_single_line(sanitize_spoken_vietnamese(str(tts_val).strip())),
+                    "tts_word_count": parsed_wc,
                 })
             return out
 

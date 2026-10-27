@@ -423,6 +423,13 @@ def get_out_dir() -> Path:
     return d.resolve()
 
 
+def set_custom_out_dir(target: Path | str) -> None:
+    """Set custom output directory in environment variable and ensure existence."""
+    p = Path(target).resolve()
+    _mkdir_retry(p)
+    os.environ["DUBSTUDIO_OUT_DIR"] = str(p)
+
+
 def get_env_file() -> Path:
     """Return .env path: %LocalAppData%\\DubStudioData\\.env in packaged mode, or repo .env in dev."""
     if is_packaged():

@@ -92,12 +92,20 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
                     pass
 
     # Fallback 3: Max end timestamp from fit_plan and segments
-    max_seg_end = max(
-        [float(item.get("end", 0.0)) for item in fit_plan] +
-        [float(s.get("end", 0.0)) for s in seg_data.get("segments", [])],
-        default=0.0
-    )
-    video_dur = max(video_dur, max_seg_end + 1.0)
+    max_seg_end = 0.0
+    for item in fit_plan:
+        st = float(item.get("start", 0.0))
+        wav_dur = float(item.get("dur", 0.0))
+        wav_file = job.workspace / item.get("wav", "")
+        if wav_file.exists():
+            try:
+                wav_dur = max(wav_dur, float(sf.info(str(wav_file.resolve())).duration))
+            except Exception:
+                pass
+        max_seg_end = max(max_seg_end, st + wav_dur)
+    for s in seg_data.get("segments", []):
+        max_seg_end = max(max_seg_end, float(s.get("end", 0.0)))
+    video_dur = max(video_dur, max_seg_end + 2.0)
 
     # Detect native TTS sample rate from fit_plan items to avoid any lossy resampling
     sr = 24000
@@ -172,7 +180,7 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
         sid = item.get("id")
         smeta = seg_lookup.get(sid, {})
         # Skip if muted or keep_original is requested
-        if item.get("muted") or smeta.get("mute_tts") or smeta.get("keep_original"):
+        if item.get("muted") or smeta.get("mute_tts") or smeta.get("muted_tts") or smeta.get("keep_original"):
             continue
 
         start_sec = item["start"]
@@ -191,21 +199,16 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
             down = int(file_sr) // g
             audio_data = resample_poly(audio_data, up, down).astype(np.float32)
 
-        # Strict anti-overlap ("chống đè giọng") enforcement
+        # Natural speech transition and anti-overlap leveling
         if i + 1 < len(fit_plan):
             next_start_sec = float(fit_plan[i + 1]["start"])
-            max_allowed_dur = max(0.1, next_start_sec - start_sec + 0.08)
-            curr_dur = len(audio_data) / sr
-            if curr_dur > max_allowed_dur:
-                max_samples = int(max_allowed_dur * sr)
-                audio_data = audio_data[:max_samples]
-                fade_samples = min(int(0.05 * sr), len(audio_data))
-                if fade_samples > 0:
-                    audio_data[-fade_samples:] *= np.linspace(1.0, 0.0, fade_samples, dtype=np.float32)
-            elif curr_dur > (next_start_sec - start_sec):
-                fade_samples = min(int(0.05 * sr), len(audio_data))
-                if fade_samples > 0:
-                    audio_data[-fade_samples:] *= np.linspace(1.0, 0.15, fade_samples, dtype=np.float32)
+            overlap_sec = (start_sec + len(audio_data) / sr) - next_start_sec
+            if overlap_sec > 0:
+                # Apply smooth cross-tail decay over the overlap region to prevent collision
+                # while preserving all spoken words naturally (never chop off speech mid-sentence!)
+                overlap_samples = min(int(overlap_sec * sr), len(audio_data))
+                if overlap_samples > 0:
+                    audio_data[-overlap_samples:] *= np.linspace(1.0, 0.05, overlap_samples, dtype=np.float32)
 
         start_idx = int(start_sec * sr)
         end_idx = min(start_idx + len(audio_data), total_samples)
@@ -301,6 +304,7 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
     # Combine with BGM if available
     bgm_wav = job.workspace / "audio" / "bgm.wav"
     final_mixed_wav = job.workspace / "voice_track.wav"
+    mixed_wav = job.workspace / "mixed.wav"
 
     # Read 4-track audio mixing settings
     orig_bgm_volume = 0.80
@@ -361,7 +365,7 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
     input_idx = 1
 
     # Track 2: Video separated BGM (uses ducked BGM if passthrough ranges active)
-    # Applied with intelligent sidechain ducking against the Vietnamese voice track!
+    # Applied with musical sidechain ducking so BGM stays clear and present
     if orig_bgm_volume <= 1.0:
         bgm_gain = max(0.0, orig_bgm_volume)
     else:
@@ -370,15 +374,15 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
     if bgm_effective_wav and bgm_effective_wav.exists() and bgm_gain > 0.001:
         inputs.extend(["-i", str(bgm_effective_wav.resolve())])
         filter_parts.append(
-            f"[{input_idx}:a]highpass=f=40,loudnorm=I=-14:TP=-1.0:LRA=10,volume={bgm_gain:.2f},aformat=channel_layouts=stereo,aresample=48000[raw_bgm]"
+            f"[{input_idx}:a]highpass=f=35,volume={bgm_gain:.2f},aformat=channel_layouts=stereo,aresample=48000[raw_bgm]"
         )
         filter_parts.append(
-            "[raw_bgm][vi]sidechaincompress=threshold=0.03:ratio=4:attack=20:release=250[ducked_bgm]"
+            "[raw_bgm][vi]sidechaincompress=threshold=0.15:ratio=2.0:attack=40:release=350[ducked_bgm]"
         )
         mix_inputs.append("[ducked_bgm]")
         input_idx += 1
 
-    # Track 3: Custom external BGM (also ducked by voice track!)
+    # Track 3: Custom external BGM
     if custom_bgm_volume <= 1.0:
         custom_gain = max(0.0, custom_bgm_volume)
     else:
@@ -387,10 +391,10 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
     if custom_bgm_path and custom_bgm_path.exists() and custom_gain > 0.001:
         inputs.extend(["-stream_loop", "-1", "-i", str(custom_bgm_path.resolve())])
         filter_parts.append(
-            f"[{input_idx}:a]highpass=f=40,loudnorm=I=-14:TP=-1.0:LRA=10,volume={custom_gain:.2f},aformat=channel_layouts=stereo,aresample=48000[raw_custom_bgm]"
+            f"[{input_idx}:a]highpass=f=35,volume={custom_gain:.2f},aformat=channel_layouts=stereo,aresample=48000[raw_custom_bgm]"
         )
         filter_parts.append(
-            "[raw_custom_bgm][vi]sidechaincompress=threshold=0.03:ratio=4:attack=20:release=250[ducked_custom_bgm]"
+            "[raw_custom_bgm][vi]sidechaincompress=threshold=0.15:ratio=2.0:attack=40:release=350[ducked_custom_bgm]"
         )
         mix_inputs.append("[ducked_custom_bgm]")
         input_idx += 1
@@ -404,7 +408,7 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
     if include_orig_voice and orig_target and orig_target.exists() and orig_voice_gain > 0.001:
         inputs.extend(["-i", str(orig_target.resolve())])
         filter_parts.append(
-            f"[{input_idx}:a]highpass=f=75,loudnorm=I=-14:TP=-1.0:LRA=7,volume={orig_voice_gain:.2f},aformat=channel_layouts=stereo,aresample=48000[orig_voice]"
+            f"[{input_idx}:a]highpass=f=75,volume={orig_voice_gain:.2f},aformat=channel_layouts=stereo,aresample=48000[orig_voice]"
         )
         mix_inputs.append("[orig_voice]")
         input_idx += 1
@@ -451,6 +455,13 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
             hint_vi="Kiểm tra các tệp audio trung gian trong workspace.",
             details={"stderr": (e.stderr.decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else str(e.stderr))[-300:]},
         )
+
+    # Replicate to mixed.wav for explicit multi-stem export
+    import shutil
+    try:
+        shutil.copy2(final_mixed_wav, mixed_wav)
+    except Exception:
+        pass
 
     # Automatically generate preview_dubbed.mp4 for instant desktop preview with audio
     input_mp4 = job.workspace / "input.mp4"

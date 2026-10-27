@@ -21,15 +21,18 @@ def run(job: JobContext, cfg: AppConfig) -> None:
         except Exception:
             pass
 
+    from dubstudio.tts.base import clean_voice_name
+
     # Strictly use male and female voices configured in Settings or Job Config
-    male_voice = conf.get("default_male_voice") or conf.get("voice_male") or cfg.tts.default_male_voice
-    female_voice = conf.get("default_female_voice") or conf.get("voice_female") or cfg.tts.default_female_voice
+    male_voice = clean_voice_name(conf.get("default_male_voice") or conf.get("voice_male") or cfg.tts.default_male_voice, "Minh Đức")
+    female_voice = clean_voice_name(conf.get("default_female_voice") or conf.get("voice_female") or cfg.tts.default_female_voice, "Quỳnh Anh")
     detect_gender = bool(conf.get("detect_gender", False))
     single_choice = conf.get("single_voice_gender", "male")
+    single_voice_override = clean_voice_name(conf.get("single_voice"), male_voice) if conf.get("single_voice") else None
 
     import hashlib
     base_hash = compute_file_hash(segments_file)
-    cfg_sig = f"{detect_gender}|{single_choice}|{male_voice}|{female_voice}"
+    cfg_sig = f"{detect_gender}|{single_choice}|{male_voice}|{female_voice}|{single_voice_override}"
     input_hash = hashlib.md5(f"{base_hash}|{cfg_sig}".encode("utf-8")).hexdigest()
 
     with open(segments_file, "r", encoding="utf-8") as f:
@@ -39,8 +42,16 @@ def run(job: JobContext, cfg: AppConfig) -> None:
 
     # Fast-path: When detect_gender is False, assign fixed voice immediately without F0 audio analysis
     if not detect_gender:
-        target_voice = female_voice if single_choice == "female" else male_voice
-        target_gender = "female" if single_choice == "female" else "male"
+        if single_voice_override:
+            target_voice = single_voice_override
+            from dubstudio.tts.base import get_voice_gender
+            target_gender = get_voice_gender(target_voice)
+            if target_gender == "unknown":
+                target_gender = "female" if single_choice == "female" else "male"
+        else:
+            target_voice = female_voice if single_choice == "female" else male_voice
+            target_gender = "female" if single_choice == "female" else "male"
+
         already_assigned = len(segments) > 0 and all(s.get("voice") == target_voice for s in segments)
         if job.is_stage_done(stage_name, input_hash) and already_assigned:
             emit_event(stage_name, 100.0, f"Giọng đọc cố định ({target_voice}) đã được gán trước đó (bỏ qua)")
@@ -49,7 +60,7 @@ def run(job: JobContext, cfg: AppConfig) -> None:
 
         job.start_stage(stage_name, input_hash)
         for seg in segments:
-            if not seg.get("user_edited"):
+            if not seg.get("user_edited") and not seg.get("user_edited_voice"):
                 seg["gender"] = target_gender
                 seg["voice"] = target_voice
 
@@ -107,15 +118,18 @@ def run(job: JobContext, cfg: AppConfig) -> None:
 
     if not detect_gender:
         # Uniform single-voice mode: assign only if segment was not manually edited by user
-        target_voice = female_voice if dominant_gender == "female" else male_voice
+        if single_voice_override:
+            target_voice = single_voice_override
+        else:
+            target_voice = female_voice if dominant_gender == "female" else male_voice
         for seg in segments:
-            if not seg.get("user_edited"):
+            if not seg.get("user_edited") and not seg.get("user_edited_voice"):
                 seg["gender"] = dominant_gender
                 seg["voice"] = target_voice
     else:
         # Multi-voice mode: classify male vs female segments (skip if segment was manually edited)
         for seg in segments:
-            if seg.get("user_edited"):
+            if seg.get("user_edited") or seg.get("user_edited_voice"):
                 continue
             g = seg.get("gender")
             if g == "male":

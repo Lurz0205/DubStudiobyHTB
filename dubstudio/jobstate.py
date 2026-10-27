@@ -3,32 +3,54 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import os
+import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from dubstudio.errors import DubError
+
+_json_write_lock = threading.Lock()
 
 
 def atomic_write_json(path: Path | str, data: Any, indent: int = 2) -> None:
     """Safely write data to a JSON file atomically using a temporary file and atomic replace.
     
-    Guarantees that interrupted writes or crashes never leave a corrupted or 0-byte file on disk.
+    Includes Windows-resilient retry loop and fallback for locked file handles.
     """
     p = Path(path).resolve()
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = p.with_suffix(f"{p.suffix}.tmp_{os.getpid()}_{id(data)}")
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=indent)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, p)
-    except Exception:
-        if tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except Exception:
-                pass
-        raise
+    tmp_path = p.with_suffix(f"{p.suffix}.tmp_{os.getpid()}_{id(data)}_{time.time_ns()}")
+    
+    with _json_write_lock:
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=indent)
+                f.flush()
+                os.fsync(f.fileno())
+
+            # Windows retry loop for os.replace when destination might be temporarily locked for reading
+            replaced = False
+            for attempt in range(10):
+                try:
+                    os.replace(tmp_path, p)
+                    replaced = True
+                    break
+                except PermissionError:
+                    time.sleep(0.02 * (attempt + 1))
+                except Exception:
+                    break
+
+            if not replaced:
+                # Fallback: direct overwrite if os.replace is blocked by Windows lock
+                with open(p, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=indent)
+                    f.flush()
+        finally:
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
 
 
 def compute_file_hash(path: Path) -> str:
@@ -50,8 +72,18 @@ def compute_file_hash(path: Path) -> str:
 class JobContext:
     """Represents a processing job with a dedicated workspace and state.json."""
 
-    def __init__(self, workspace_path: Path, job_id: str, input_path: Optional[Path] = None) -> None:
-        self.workspace = workspace_path
+    def __init__(
+        self,
+        workspace_path: Optional[Path] = None,
+        job_id: str = "",
+        input_path: Optional[Path] = None,
+        workspace: Optional[Path] = None,
+    ) -> None:
+        target_ws = workspace_path or workspace
+        if target_ws is None:
+            from dubstudio.paths import resolve_job_workspace
+            target_ws = resolve_job_workspace(job_id)
+        self.workspace = Path(target_ws).resolve()
         self.job_id = job_id
         self.input_path = input_path
         self.state_file = self.workspace / "state.json"

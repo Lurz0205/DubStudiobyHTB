@@ -1,3 +1,8 @@
+import pytest
+from pathlib import Path
+if not Path('ui').exists():
+    pytest.skip('Legacy PyQt6 v1 UI tests skipped because ui/ was decommissioned in v2.0.0', allow_module_level=True)
+
 """Unit tests for smooth 0-200% single-file headroom scaling and debounce volume control."""
 import os
 import sys

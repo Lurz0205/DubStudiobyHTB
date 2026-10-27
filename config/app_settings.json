@@ -1,0 +1,9 @@
+{
+  "translation_provider": "gemini_web",
+  "translation_tone": "Tự nhiên, đời thường",
+  "default_male_voice": "Hải Đăng",
+  "default_female_voice": "Trúc Ly",
+  "whisper_model": "sensevoice-small",
+  "separation_model": "Kim_Vocal_2.onnx",
+  "out_dir": "C:\\Users\\sieut\\Documents\\ToolDichThuat\\out"
+}
