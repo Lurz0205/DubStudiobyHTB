@@ -243,19 +243,6 @@ def run_audit(target_version: Optional[str] = None, pending_commit_msg: Optional
     audit_md_path = Path("RELEASE_AUDIT.md")
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
 
-    # Extract summary of features and fixes from RELEASE_NOTES.md dynamically
-    summary_text = ""
-    rn_path = Path("RELEASE_NOTES.md")
-    if rn_path.exists():
-        try:
-            rn_content = rn_path.read_text(encoding="utf-8")
-            if "### 🛡️" in rn_content:
-                summary_text = rn_content.split("### 🛡️")[0].strip()
-            else:
-                summary_text = rn_content.strip()
-        except Exception:
-            summary_text = ""
-
     lines = [
         f"# DubStudio Release Audit — Tag-to-Tag Comparison",
         f"",
@@ -267,13 +254,7 @@ def run_audit(target_version: Optional[str] = None, pending_commit_msg: Optional
         f"",
         f"---",
         f"",
-        f"## 1. Tổng hợp toàn diện các tính năng & Lỗi đã sửa từ `{last_tag}`",
-        f"",
-        summary_text or f"Chi tiết các thay đổi được ghi nhận trong `RELEASE_NOTES.md`.",
-        f"",
-        f"---",
-        f"",
-        f"## 2. Bảng Danh mục Chi tiết Các File Thay đổi (`{last_tag}..HEAD`)",
+        f"## 1. Bảng Danh mục Chi tiết Các File Thay đổi (`{last_tag}..HEAD`)",
         f"",
         f"| Trạng thái | Đường dẫn File | SHA cũ ({last_tag}) | SHA mới (HEAD) |",
         f"|:---|:---|:---|:---|",
@@ -292,7 +273,7 @@ def run_audit(target_version: Optional[str] = None, pending_commit_msg: Optional
         f"",
         f"---",
         f"",
-        f"## 3. Lịch sử Git Commits Kể từ `{last_tag}`",
+        f"## 2. Lịch sử Git Commits Kể từ `{last_tag}`",
         f"",
     ])
 
