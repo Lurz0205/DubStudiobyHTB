@@ -2,8 +2,8 @@
 
 - **Mục tiêu phát hành:** `v2.0.1`
 - **Phiên bản gốc đối chiếu:** `v2.0.0`
-- **Thời gian kiểm toán:** `2026-10-27 19:55:28`
-- **Tổng số file thay đổi:** `19` (15 sửa đổi, 1 thêm mới, 3 đã xóa)
+- **Thời gian kiểm toán:** `2026-10-27 19:58:09`
+- **Tổng số file thay đổi:** `20` (16 sửa đổi, 1 thêm mới, 3 đã xóa)
 
 ---
 
@@ -11,6 +11,7 @@
 
 | Trạng thái | Đường dẫn File | SHA cũ (v2.0.0) | SHA mới (HEAD) |
 |:---|:---|:---|:---|
+| **Modified** | `AGENTS.md` | `9912113` | `9d08956` |
 | **Modified** | `PROGRESS.md` | `8060edb` | `f9d8d06` |
 | **Modified** | `RELEASE_NOTES.md` | `7fa10d1` | `f7cf946` |
 | **Modified** | `dubstudio/stages/mix.py` | `174ac93` | `22a6474` |
@@ -40,3 +41,4 @@
 - [`1f5dad8`] Release v2.0.1: Export Subtitle Burn Fix, BGM Real-time Slider Sync (100% Default), and Project Subtitle Status Fix
 - [`a129a8b`] Release v2.0.1: Export Subtitle Burn Fix, BGM Real-time Slider Sync (100% Default), and Project Subtitle Status Fix
 - [`9c679d1`] Release v2.0.1: Export Subtitle Burn Fix, BGM Real-time Slider Sync (100% Default), and Project Subtitle Status Fix
+- [`86ee76a`] Release v2.0.1: Export Subtitle Burn Fix, BGM Real-time Slider Sync (100% Default), and Project Subtitle Status Fix
