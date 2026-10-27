@@ -243,6 +243,19 @@ def run_audit(target_version: Optional[str] = None, pending_commit_msg: Optional
     audit_md_path = Path("RELEASE_AUDIT.md")
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
 
+    # Extract summary of features and fixes from RELEASE_NOTES.md dynamically
+    summary_text = ""
+    rn_path = Path("RELEASE_NOTES.md")
+    if rn_path.exists():
+        try:
+            rn_content = rn_path.read_text(encoding="utf-8")
+            if "### 🛡️" in rn_content:
+                summary_text = rn_content.split("### 🛡️")[0].strip()
+            else:
+                summary_text = rn_content.strip()
+        except Exception:
+            summary_text = ""
+
     lines = [
         f"# DubStudio Release Audit — Tag-to-Tag Comparison",
         f"",
@@ -256,32 +269,7 @@ def run_audit(target_version: Optional[str] = None, pending_commit_msg: Optional
         f"",
         f"## 1. Tổng hợp toàn diện các tính năng & Lỗi đã sửa từ `{last_tag}`",
         f"",
-        f"1. **Chuẩn hóa Phóng đại Âm lượng +20.0 dB & Headroom Scaling chuẩn DAW:**",
-        f"   - Giữ nguyên vẹn 100% âm lượng gốc TTS khi ở mức 100% (đạt chuẩn 0.0 dB diff).",
-        f"   - Mức 200% phóng đại thực tế cực mạnh **+20.0 dB** (gấp 10 lần biên độ sóng ban đầu), kết hợp transparent lookahead soft-limiter tại 0.98 chống clipping và không gây rè/vang.",
-        f"   - Cơ chế Headroom Scaling duy nhất (`voice_headroom_200.wav`): Không đổi source URL của file âm thanh khi kéo thanh trượt, điều chỉnh gain phần cứng tức thì, chấm dứt hoàn toàn hiện tượng khựng, giật cục hay mất tiếng.",
-        f"",
-        f"2. **Studio Vocal Enhancement & Auto-Ducking thông minh:**",
-        f"   - Chuỗi lọc giọng đọc: High-pass 80Hz cắt rung chấn micro sub-bass; EQ 3.2kHz tăng độ thoát tiếng cho phát âm tiếng Việt; EQ 350Hz làm sạch dải trung trầm bí bách.",
-        f"   - Tính năng **Auto-Ducking (`sidechaincompress`)**: Tự động giảm nhạc nền BGM xuống ~10 dB khi có giọng đọc và trả về êm ái khi dứt câu.",
-        f"",
-        f"3. **Tự động Ngắt nhịp Tách câu theo Số từ Ước lượng:**",
-        f"   - Bắt sự kiện thay đổi `Từ/dòng` lưu tức thì vào `job_config.json`.",
-        f"   - Tự động kích hoạt cơ chế tách câu ngắt nhịp ngay sau khi tạo phụ đề Bước 1 hoàn tất, loại bỏ thao tác bấm nút tách thủ công của người dùng.",
-        f"",
-        f"4. **Hợp nhất Xuất video vào Tab Chỉnh sửa Video:**",
-        f"   - Xóa bỏ nút Xuất video ở Tab Phụ đề, chuyển thành nút điều hướng trực quan sang Tab Chỉnh sửa video.",
-        f"   - Tab Chỉnh sửa video hiển thị preview phụ đề 1:1, tự động đặt tên file xuất theo tên dự án `<tên_dự_án>.mp4`, lưu đồng thời vào thư mục xuất và thư mục dự án.",
-        f"   - Bổ sung mục chọn 'Thư mục lưu video xuất' trong Cài đặt, chuẩn hóa mặc định về `~/Videos/DubStudio`.",
-        f"",
-        f"5. **Đồng bộ Tuyệt đối Hệ Tọa độ Phụ đề WYSIWYG & Mở rộng Tỉ lệ Nền (9:16):**",
-        f"   - Chuẩn hóa hệ quy chiếu `compute_subtitle_geometry` trên độ phân giải gốc của video (`native_w x native_h`).",
-        f"   - Preview và video xuất đồng nhất 100%, hộp nền đen che kín chữ Trung Quốc gốc bên dưới.",
-        f"   - Khi bật mở rộng tỉ lệ nền 9:16, phụ đề được đốt lên video gốc trước khi thêm viền đệm pad, giữ chữ nằm gọn trong khung hình gốc, không bao giờ rơi ra ngoài vùng đệm trắng.",
-        f"",
-        f"6. **Kiến trúc Cập nhật An toàn & Tự động Khóa Mốc So sánh:**",
-        f"   - Tách biệt thư mục cài đặt `%LocalAppData%\\DubStudio` và dữ liệu `%LocalAppData%\\DubStudioData`, bảo toàn 100% các model AI đã tải khi cập nhật bản mới.",
-        f"   - Luôn khóa mốc so sánh (audit & delta package) từ bản release chính thức trước đó trên GitHub (`tag_version < CURRENT_VERSION`), đảm bảo Velopack cắt delta chuẩn xác và siêu nhẹ.",
+        summary_text or f"Chi tiết các thay đổi được ghi nhận trong `RELEASE_NOTES.md`.",
         f"",
         f"---",
         f"",

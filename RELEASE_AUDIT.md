@@ -2,39 +2,44 @@
 
 - **Mục tiêu phát hành:** `v2.0.1`
 - **Phiên bản gốc đối chiếu:** `v2.0.0`
-- **Thời gian kiểm toán:** `2026-10-27 19:25:42`
-- **Tổng số file thay đổi:** `11` (9 sửa đổi, 1 thêm mới, 1 đã xóa)
+- **Thời gian kiểm toán:** `2026-10-27 19:32:13`
+- **Tổng số file thay đổi:** `12` (10 sửa đổi, 1 thêm mới, 1 đã xóa)
 
 ---
 
 ## 1. Tổng hợp toàn diện các tính năng & Lỗi đã sửa từ `v2.0.0`
 
-1. **Chuẩn hóa Phóng đại Âm lượng +20.0 dB & Headroom Scaling chuẩn DAW:**
-   - Giữ nguyên vẹn 100% âm lượng gốc TTS khi ở mức 100% (đạt chuẩn 0.0 dB diff).
-   - Mức 200% phóng đại thực tế cực mạnh **+20.0 dB** (gấp 10 lần biên độ sóng ban đầu), kết hợp transparent lookahead soft-limiter tại 0.98 chống clipping và không gây rè/vang.
-   - Cơ chế Headroom Scaling duy nhất (`voice_headroom_200.wav`): Không đổi source URL của file âm thanh khi kéo thanh trượt, điều chỉnh gain phần cứng tức thì, chấm dứt hoàn toàn hiện tượng khựng, giật cục hay mất tiếng.
+# DubStudio v2.0.1 — Bản Vá Lỗi Toàn Diện: Khắc Phục Lỗi Phụ Đề Xuất, Hòa Âm BGM & Trạng Thái Dự Án
 
-2. **Studio Vocal Enhancement & Auto-Ducking thông minh:**
-   - Chuỗi lọc giọng đọc: High-pass 80Hz cắt rung chấn micro sub-bass; EQ 3.2kHz tăng độ thoát tiếng cho phát âm tiếng Việt; EQ 350Hz làm sạch dải trung trầm bí bách.
-   - Tính năng **Auto-Ducking (`sidechaincompress`)**: Tự động giảm nhạc nền BGM xuống ~10 dB khi có giọng đọc và trả về êm ái khi dứt câu.
+Bản cập nhật bảo trì **DubStudio v2.0.1** tập trung giải quyết triệt để 3 lỗi phát sinh sau bản v2.0.0, bảo đảm quy trình làm việc từ khâu biên tập, tạo lại giọng đọc đến kết xuất video luôn đồng bộ và chính xác tuyệt đối:
 
-3. **Tự động Ngắt nhịp Tách câu theo Số từ Ước lượng:**
-   - Bắt sự kiện thay đổi `Từ/dòng` lưu tức thì vào `job_config.json`.
-   - Tự động kích hoạt cơ chế tách câu ngắt nhịp ngay sau khi tạo phụ đề Bước 1 hoàn tất, loại bỏ thao tác bấm nút tách thủ công của người dùng.
+---
 
-4. **Hợp nhất Xuất video vào Tab Chỉnh sửa Video:**
-   - Xóa bỏ nút Xuất video ở Tab Phụ đề, chuyển thành nút điều hướng trực quan sang Tab Chỉnh sửa video.
-   - Tab Chỉnh sửa video hiển thị preview phụ đề 1:1, tự động đặt tên file xuất theo tên dự án `<tên_dự_án>.mp4`, lưu đồng thời vào thư mục xuất và thư mục dự án.
-   - Bổ sung mục chọn 'Thư mục lưu video xuất' trong Cài đặt, chuẩn hóa mặc định về `~/Videos/DubStudio`.
+### 🌟 Các Điểm Nâng Cấp & Sửa Lỗi Chính Trên v2.0.1:
 
-5. **Đồng bộ Tuyệt đối Hệ Tọa độ Phụ đề WYSIWYG & Mở rộng Tỉ lệ Nền (9:16):**
-   - Chuẩn hóa hệ quy chiếu `compute_subtitle_geometry` trên độ phân giải gốc của video (`native_w x native_h`).
-   - Preview và video xuất đồng nhất 100%, hộp nền đen che kín chữ Trung Quốc gốc bên dưới.
-   - Khi bật mở rộng tỉ lệ nền 9:16, phụ đề được đốt lên video gốc trước khi thêm viền đệm pad, giữ chữ nằm gọn trong khung hình gốc, không bao giờ rơi ra ngoài vùng đệm trắng.
+#### 1. Khắc Phục Triệt Để Lỗi Phụ Đề Xuất Ra Vẫn Là Phụ Đề Cũ Của Lần Đầu Tạo
+- **Nguyên nhân trước đây:** Thuật toán trích xuất phụ đề trong `ass.py` ưu tiên đọc các lát cắt phụ (`sub_slices`) nhưng không kiểm tra đối chiếu lại với câu thoại mới sau khi rút gọn (`fit_rewrite`) hoặc chỉnh sửa câu thủ công. Điều này khiến video xuất ra vẫn mang phụ đề ban đầu dù giọng đọc đã cập nhật câu mới.
+- **Giải pháp trên v2.0.1:** Bổ sung cơ chế đối chiếu chuỗi chuẩn hóa `_norm_cmp`. Nếu nội dung lát cắt cũ không khớp với câu thoại hiện tại, hệ thống lập tức loại bỏ lát cắt rác và tự động phân tách lại dòng phụ đề mới khớp 100% từng từ với câu thoại đã rút gọn. Đồng thời đồng bộ tức thì cấu trúc phụ đề ngay khi người dùng bấm "Tạo lại giọng đọc" trong bảng sửa câu.
 
-6. **Kiến trúc Cập nhật An toàn & Tự động Khóa Mốc So sánh:**
-   - Tách biệt thư mục cài đặt `%LocalAppData%\DubStudio` và dữ liệu `%LocalAppData%\DubStudioData`, bảo toàn 100% các model AI đã tải khi cập nhật bản mới.
-   - Luôn khóa mốc so sánh (audit & delta package) từ bản release chính thức trước đó trên GitHub (`tag_version < CURRENT_VERSION`), đảm bảo Velopack cắt delta chuẩn xác và siêu nhẹ.
+#### 2. Sửa Lỗi Điều Chỉnh Âm Lượng Nhạc Nền (BGM) & Đặt Mặc Định BGM 100%
+- **Nguyên nhân trước đây:** Trình phát xem trước ưu tiên nạp tệp âm thanh đã hòa trộn sẵn (`voice_track.wav`) thay vì giọng đọc gốc thuần (`voice_raw.wav`), khiến nhạc nền bị "nướng chết" vào rãnh giọng. Đồng thời vòng lặp animation của trình xem trước bị dính lỗi *stale closure*, liên tục ghi đè lại mức âm lượng cũ khi kéo thanh trượt lúc đang phát.
+- **Giải pháp trên v2.0.1:**
+  - Tách bạch hoàn toàn rãnh giọng đọc thuần (`voice_raw.wav`) và rãnh nhạc nền (`audio/bgm.wav`) trên trình phát xem trước.
+  - Sử dụng tham chiếu trực tiếp `syncAudioVolumesRef` giúp việc kéo thanh trượt âm lượng BGM hay Thuyết minh thay đổi âm lượng tức thì trong thời gian thực (real-time).
+  - Nâng mức âm lượng mặc định của nhạc nền (BGM) lên **100%** (chuẩn cân bằng hoàn hảo với giọng đọc).
+  - Bổ sung cơ chế lưu trữ và tự động chuyển đổi thang âm lượng 0–200% xuyên suốt từ giao diện sang tệp hòa âm `mix_settings.json` khi xuất video.
+
+#### 3. Sửa Lỗi Dự Án Mới Tạo Bị Đánh Dấu Đã Hoàn Thành Phụ Đề
+- **Nguyên nhân trước đây:** Khi tạo dự án mới, hệ thống tạo sẵn tệp `segments.json` chứa danh sách rỗng `[]`, khiến trang danh sách dự án nhận diện tệp tồn tại và tự động tick xanh hoàn thành bước "Phụ đề".
+- **Giải pháp trên v2.0.1:** Cập nhật cơ chế kiểm tra tiến độ dự án: chỉ đánh dấu bước "Phụ đề" khi `segments.json` thực sự chứa ít nhất 1 câu thoại đã nhận dạng/dịch thuật (`len(segments) > 0`). Dự án mới tạo sẽ hiển thị chính xác trạng thái ban đầu là "Video gốc".
+
+---
+
+### 📋 Hướng Dẫn Cập Nhật & Nâng Cấp:
+- **Tự động cập nhật:** Ứng dụng tích hợp công nghệ cập nhật thông minh (Velopack). Khi mở ứng dụng, hệ thống sẽ tự động thông báo và tải gói nâng cấp delta nhỏ gọn.
+- **Người dùng mới hoặc cài lại:** Tải tệp `DubStudio-win-Setup.exe` ở phần Assets bên dưới và cài đặt tự động trong 1 click. Toàn bộ các dự án và mô hình AI đã tải trong máy đều được giữ nguyên 100% tại `%LocalAppData%\DubStudioData`.
+
+---
 
 ---
 
@@ -50,6 +55,7 @@
 | **Modified** | `frontend/package.json` | `c876b7a` | `2fde240` |
 | **Modified** | `frontend/src/App.tsx` | `722279c` | `4e06a17` |
 | **Modified** | `frontend/src/components/video/WYSIWYGPlayer.tsx` | `3a1d3ee` | `ce890c8` |
+| **Modified** | `scripts/audit_release_diff.py` | `ce94d30` | `fadb7fd` |
 | **Modified** | `start_app.py` | `67933f3` | `0063946` |
 | **Added** | `tests/test_v201_bugfixes.py` | *N/A* | `2602753` |
 | **Deleted** | `RELEASE_AUDIT.md` | `a5c778b` | *N/A* |
@@ -60,3 +66,4 @@
 
 - **[Bản phát hành này / HEAD]** Release v2.0.1: Export Subtitle Burn Fix, BGM Real-time Slider Sync (100% Default), and Project Subtitle Status Fix
 - [`9070cca`] Release v2.0.1: Export Subtitle Burn Fix, BGM Real-time Slider Sync (100% Default), and Project Subtitle Status Fix
+- [`1f5dad8`] Release v2.0.1: Export Subtitle Burn Fix, BGM Real-time Slider Sync (100% Default), and Project Subtitle Status Fix
