@@ -1,6 +1,11 @@
 # PROGRESS.md — DubStudio Progress
 
 ## Đã hoàn thành (Done)
+- **Phát hành DubStudio v2.0.1 — Vá lỗi Phụ đề xuất, Hòa âm BGM & Trạng thái dự án:**
+  - **Sửa lỗi phụ đề xuất mang nội dung cũ:** `dubstudio/subtitles/ass.py` bổ sung hàm `_norm_cmp` loại bỏ việc nạp các lát cắt cũ (`sub_slices`) khi không khớp với câu thoại mới sau `fit_rewrite` hoặc chỉnh sửa; `start_app.py` tự động phân tách lại `cues` và `sub_slices` khi sửa câu hoặc tạo lại TTS đơn lẻ.
+  - **Sửa lỗi chỉnh âm BGM không tác dụng & nâng mặc định lên 100%:** `start_app.py` ưu tiên nạp `voice_raw.wav` cho `voice_url` tránh nướng chết BGM vào rãnh giọng; `WYSIWYGPlayer.tsx` dùng `syncAudioVolumesRef` triệt tiêu lỗi stale closure khi kéo thanh trượt lúc đang phát; nâng mặc định BGM lên 100% trong `App.tsx` và `mix.py`; đồng bộ đầy đủ các kênh âm lượng (0–200%) vào `mix_settings.json` khi xuất.
+  - **Sửa lỗi dự án mới tạo tick hoàn thành phụ đề:** `start_app.py` cập nhật `get_projects()` chỉ gán `has_subtitles = True` khi `segments.json` thực sự chứa dữ liệu (`len(segments) > 0`).
+  - **Đóng gói & Kiểm thử:** Chạy `pytest tests/ -q` đạt 179 passed, 10 skipped (100% PASS); biên dịch gói ứng dụng sạch `dist\DubStudio\DubStudio.exe` với ExitCode 0 (--selftest OK).
 - **Sửa triệt để lỗi Preview ở trang chỉnh sửa & trang xuất bị lỗi (500 Error do xung đột ghi đọc file):**
   - `dubstudio/api/app.py`: `_quick_rebuild_voice_track` sử dụng cơ chế ghi nguyên tử (atomic write qua file tạm `.tmp` và `os.replace`), chấm dứt triệt để lỗi Starlette `500 Internal Server Error: Too little data for declared Content-Length` khi trình phát preview đang đọc tệp đồng thời. Bổ sung cơ chế tự phục hồi `onError` trên các thẻ `<audio>` trong `WYSIWYGPlayer.tsx`.
 - **Sửa lỗi tính năng Tắt TTS câu thoại (`mute_tts`):**
@@ -50,6 +55,10 @@
   - **Kiểm thử tự động:** Cập nhật `tests/test_api.py` và gắn cờ skip chuẩn cho các test UI v1 đã ngừng hoạt động. Chạy `pytest tests/ -q` đạt **175 passed, 10 skipped (100% PASS, 0 lỗi)**.
   - **Tối ưu PyInstaller (`scripts/build_app.ps1`):** Loại trừ triệt để `PyQt6`, `PyQt5`, `tkinter`, `ui`; build trực tiếp từ `start_app.py`; bảo đảm không gom thư mục `samples/` hay `tests/`.
   - **Nghiệm thu đóng gói:** `dist\DubStudio\DubStudio.exe --selftest` trả về `ExitCode: 0`. Dung lượng bản phát hành đạt **1.381,9 MB (1.35 GB)**.
+- **Phát hành DubStudio v2.0.0 chính thức trên GitHub:**
+  - **Nâng cấp CI/CD Workflow (`.github/workflows/build_release.yml`):** Tích hợp Node.js 20 tự động build frontend React với Inline CSS Guarantee; gỡ bỏ hoàn toàn `PyQt6`; tự động dò mốc so sánh release trước (`v1.1.3`) và đóng gói Velopack (`full.nupkg`, `delta.nupkg`, `Setup.exe`).
+  - **Viết mới tài liệu & Ghi chú phát hành:** Viết mới hoàn toàn `README.md` theo chuẩn v2.0.0 và biên soạn `RELEASE_NOTES.md` theo ngôn ngữ phổ thông dễ hiểu kèm thông số kỹ thuật.
+  - **Đẩy mã nguồn & Gắn thẻ Tag:** Đã chạy `scripts/push_code_to_github.py --tag v2.0.0`, tạo commit `12f4cca`, đẩy lên `main` và gắn thẻ `v2.0.0`. GitHub Actions đang tự động đóng gói bản cài đặt trực tiếp trên mây.
 
 ## Tiếp theo (Next)
-- Người dùng kiểm tra trải nghiệm mượt mà của bản build độc lập và kiểm tra các tính năng studio.
+- Theo dõi GitHub Actions hoàn tất và người dùng tải bản cài đặt `v2.0.0` chính thức từ GitHub Releases.

@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import Dict
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 SCHEMA_VERSION = 2
 MIN_COMPATIBLE_SCHEMA_VERSION = 1
 

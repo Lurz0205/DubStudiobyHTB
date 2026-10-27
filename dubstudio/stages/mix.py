@@ -307,7 +307,7 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
     mixed_wav = job.workspace / "mixed.wav"
 
     # Read 4-track audio mixing settings
-    orig_bgm_volume = 0.80
+    orig_bgm_volume = 1.00
     custom_bgm_path = None
     custom_bgm_volume = 0.50
     include_orig_voice = False
@@ -317,18 +317,29 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
     if mix_settings_file.exists():
         try:
             mix_data = json.loads(mix_settings_file.read_text(encoding="utf-8"))
-            orig_bgm_volume = float(mix_data.get("orig_bgm_volume", mix_data.get("bgm_volume", 0.80)))
-            orig_bgm_volume = max(0.0, min(2.0, orig_bgm_volume))
-            orig_voice_volume = float(mix_data.get("orig_voice_volume", 0.00))
-            orig_voice_volume = max(0.0, min(2.0, orig_voice_volume))
+            raw_bgm = float(mix_data.get("orig_bgm_volume", mix_data.get("bgm_volume", 1.00)))
+            if raw_bgm > 2.0:
+                raw_bgm /= 100.0
+            orig_bgm_volume = max(0.0, min(2.0, raw_bgm))
+
+            raw_orig_voice = float(mix_data.get("orig_voice_volume", 0.00))
+            if raw_orig_voice > 2.0:
+                raw_orig_voice /= 100.0
+            orig_voice_volume = max(0.0, min(2.0, raw_orig_voice))
             include_orig_voice = bool(mix_data.get("include_orig_voice", False)) or (orig_voice_volume > 0.01)
-            vi_voice_volume = float(mix_data.get("vi_voice_volume", 1.00))
-            vi_voice_volume = max(0.0, min(2.0, vi_voice_volume))
+
+            raw_vi_voice = float(mix_data.get("vi_voice_volume", mix_data.get("voice_volume", 1.00)))
+            if raw_vi_voice > 2.0:
+                raw_vi_voice /= 100.0
+            vi_voice_volume = max(0.0, min(2.0, raw_vi_voice))
+
             c_bgm = mix_data.get("custom_bgm_path")
             if c_bgm and Path(c_bgm).exists():
                 custom_bgm_path = Path(c_bgm)
-            custom_bgm_volume = float(mix_data.get("custom_bgm_volume", 0.50))
-            custom_bgm_volume = max(0.0, min(2.0, custom_bgm_volume))
+            raw_c_bgm_vol = float(mix_data.get("custom_bgm_volume", 0.50))
+            if raw_c_bgm_vol > 2.0:
+                raw_c_bgm_vol /= 100.0
+            custom_bgm_volume = max(0.0, min(2.0, raw_c_bgm_vol))
         except Exception:
             pass
 

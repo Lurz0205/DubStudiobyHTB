@@ -214,6 +214,10 @@ def get_segment_slices(seg: Dict[str, Any], target_words: int = 12, max_words: i
     en = float(seg.get("end", st + 1.0))
     total_dur = max(0.2, en - st)
 
+    def _norm_cmp(s: str) -> str:
+        import re
+        return re.sub(r'[^\w\s]', '', s.lower()).strip()
+
     # 1. Explicit cues (from DP word-count splitting or manual edits)
     cues = seg.get("cues")
     if cues and isinstance(cues, list) and len(cues) > 0:
@@ -221,36 +225,39 @@ def get_segment_slices(seg: Dict[str, Any], target_words: int = 12, max_words: i
         if valid_cues:
             combined_cues = " ".join(c.get("text", "").strip() for c in valid_cues)
             combined_raw = " ".join(raw_text.split())
-            if combined_cues == combined_raw:
+            if combined_cues == combined_raw or _norm_cmp(combined_cues) == _norm_cmp(combined_raw):
                 return [{
                     "text": c.get("text", "").strip(),
                     "start": float(c.get("start", st)),
                     "end": float(c.get("end", en)),
                 } for c in valid_cues]
 
-    # 2. Explicit sub_slices from studio
+    # 2. Explicit sub_slices from studio (must match current raw_text to prevent stale subtitle burn)
     sub_slices = seg.get("sub_slices")
     if sub_slices and isinstance(sub_slices, list) and len(sub_slices) > 0:
         valid_slices = [s for s in sub_slices if isinstance(s, dict) and s.get("text", "").strip()]
         if valid_slices:
-            word_counts = [max(1, len(sl.get("text", "").strip().split())) for sl in valid_slices]
-            total_w = sum(word_counts)
-            res = []
-            curr_t = st
-            for idx, (sl, wc) in enumerate(zip(valid_slices, word_counts), start=1):
-                if idx == len(valid_slices):
-                    seg_end = en
-                else:
-                    dur = round(total_dur * (wc / total_w), 2)
-                    seg_end = round(curr_t + dur, 2)
-                    seg_end = max(curr_t + 0.1, min(en - 0.1 * (len(valid_slices) - idx), seg_end))
-                res.append({
-                    "text": sl.get("text", "").strip(),
-                    "start": round(curr_t, 3),
-                    "end": round(seg_end, 3),
-                })
-                curr_t = seg_end
-            return res
+            combined_slices = " ".join(sl.get("text", "").strip() for sl in valid_slices)
+            combined_raw = " ".join(raw_text.split())
+            if combined_slices == combined_raw or _norm_cmp(combined_slices) == _norm_cmp(combined_raw):
+                word_counts = [max(1, len(sl.get("text", "").strip().split())) for sl in valid_slices]
+                total_w = sum(word_counts)
+                res = []
+                curr_t = st
+                for idx, (sl, wc) in enumerate(zip(valid_slices, word_counts), start=1):
+                    if idx == len(valid_slices):
+                        seg_end = en
+                    else:
+                        dur = round(total_dur * (wc / total_w), 2)
+                        seg_end = round(curr_t + dur, 2)
+                        seg_end = max(curr_t + 0.1, min(en - 0.1 * (len(valid_slices) - idx), seg_end))
+                    res.append({
+                        "text": sl.get("text", "").strip(),
+                        "start": round(curr_t, 3),
+                        "end": round(seg_end, 3),
+                    })
+                    curr_t = seg_end
+                return res
 
     # 2. Text containing newlines (\n) - sequential display with _effective_weight matching cue_split.py
     if "\n" in raw_text:

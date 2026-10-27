@@ -217,7 +217,7 @@ export const WYSIWYGPlayer: React.FC<WYSIWYGPlayerProps> = ({
       return isMuted && curTime >= c.start && curTime <= c.end;
     });
 
-    if (!voiceSrc) {
+    if (!voiceSrc && !bgmSrc && !customBgmSrc) {
       if (videoRef.current) {
         videoRef.current.volume = 1.0;
         videoRef.current.muted = false;
@@ -260,10 +260,12 @@ export const WYSIWYGPlayer: React.FC<WYSIWYGPlayerProps> = ({
     }
   };
 
-  // Keep latest onTimeUpdate callback in ref to prevent tearing down the animation loop
+  // Keep latest onTimeUpdate and syncAudioVolumes callbacks in refs to prevent stale closures in the animation loop
   const onTimeUpdateRef = useRef(onTimeUpdate);
+  const syncAudioVolumesRef = useRef(syncAudioVolumes);
   useEffect(() => {
     onTimeUpdateRef.current = onTimeUpdate;
+    syncAudioVolumesRef.current = syncAudioVolumes;
   });
 
   // Direct user-gesture playback control: avoids browser autoplay policy blocks on unmuted video
@@ -368,7 +370,7 @@ export const WYSIWYGPlayer: React.FC<WYSIWYGPlayerProps> = ({
         const cur = v.currentTime;
         if (Math.abs(cur - lastDispatchedTime) >= 0.025) {
           lastDispatchedTime = cur;
-          syncAudioVolumes(cur);
+          syncAudioVolumesRef.current?.(cur);
           onTimeUpdateRef.current?.(cur);
         }
       }
@@ -384,7 +386,7 @@ export const WYSIWYGPlayer: React.FC<WYSIWYGPlayerProps> = ({
   const handleTimeUpdate = () => {
     if (!videoRef.current) return;
     const cur = videoRef.current.currentTime;
-    syncAudioVolumes(cur);
+    syncAudioVolumesRef.current?.(cur);
     onTimeUpdateRef.current?.(cur);
   };
 

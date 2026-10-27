@@ -33,7 +33,7 @@ export const App: React.FC = () => {
   const [cues, setCues] = useState<CueItem[]>(DEFAULT_CUES);
   const [aspectRatio, setAspectRatio] = useState<string>('original');
   const [voiceVol, setVoiceVol] = useState<number>(100);
-  const [bgmVol, setBgmVol] = useState<number>(80);
+  const [bgmVol, setBgmVol] = useState<number>(100);
 
   // Subtitle styling matching v1.1.3 style.json 100%
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>({
@@ -172,8 +172,14 @@ export const App: React.FC = () => {
         }
 
         if (data.style) {
-          if (typeof data.style.voice_volume === 'number') setVoiceVol(data.style.voice_volume);
-          if (typeof data.style.bgm_volume === 'number') setBgmVol(data.style.bgm_volume);
+          if (typeof data.style.voice_volume === 'number') {
+            const vVal = data.style.voice_volume;
+            setVoiceVol(vVal <= 2.0 && vVal > 0 ? Math.round(vVal * 100) : vVal);
+          }
+          if (typeof data.style.bgm_volume === 'number') {
+            const bVal = data.style.bgm_volume;
+            setBgmVol(bVal <= 2.0 && bVal > 0 ? Math.round(bVal * 100) : bVal);
+          }
           setSubtitleStyle((prev) => ({
             ...prev,
             ...data.style,

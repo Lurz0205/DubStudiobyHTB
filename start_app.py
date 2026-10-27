@@ -395,8 +395,6 @@ class DesktopAPIBridge:
             "translation_tone": app_settings.get("translation_tone", "Tự nhiên, đời thường"),
         }
         (ws / "job_config.json").write_text(json.dumps(job_cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-        if not (ws / "segments.json").exists():
-            (ws / "segments.json").write_text(json.dumps({"segments": []}, ensure_ascii=False, indent=2), encoding="utf-8")
         return {"status": "success", "job_id": job_id, "title": job_cfg["title"]}
 
     def get_projects(self) -> List[Dict[str, Any]]:
@@ -412,7 +410,15 @@ class DesktopAPIBridge:
             if p.is_dir() and not p.name.startswith(".") and p.name not in non_job_dirs:
                 has_video = (p / "input.mp4").exists()
                 job_cfg_file = p / "job_config.json"
-                has_subtitles = (p / "segments.json").exists()
+                seg_file = p / "segments.json"
+                has_subtitles = False
+                if seg_file.exists():
+                    try:
+                        s_data = json.loads(seg_file.read_text(encoding="utf-8"))
+                        segs = s_data.get("segments", []) if isinstance(s_data, dict) else s_data
+                        has_subtitles = bool(isinstance(segs, list) and len(segs) > 0)
+                    except Exception:
+                        has_subtitles = False
                 has_state = (p / "state.json").exists()
                 if not has_video and not job_cfg_file.exists() and not has_subtitles and not has_state:
                     # Skip completely empty zombie folders
@@ -427,7 +433,6 @@ class DesktopAPIBridge:
                         pass
                 
                 mtime = p.stat().st_mtime
-                has_subtitles = (p / "segments.json").exists()
                 has_dub = (p / "voice_track.wav").exists() or (p / "voice_raw.wav").exists()
                 has_export = (p / "out" / "final.mp4").exists()
 
@@ -609,11 +614,11 @@ class DesktopAPIBridge:
             "has_raw_voice": (ws / "voice_raw.wav").exists() or (ws / "voice_track.wav").exists(),
             "has_bgm": (ws / "audio" / "bgm.wav").exists(),
             "voice_url": (
-                f"/media/workspace/{job_id}/voice_track.wav?t={int(time.time() * 1000)}"
-                if (ws / "voice_track.wav").exists()
+                f"/media/workspace/{job_id}/voice_raw.wav?t={int(time.time() * 1000)}"
+                if (ws / "voice_raw.wav").exists()
                 else (
-                    f"/media/workspace/{job_id}/voice_raw.wav?t={int(time.time() * 1000)}"
-                    if (ws / "voice_raw.wav").exists()
+                    f"/media/workspace/{job_id}/voice_track.wav?t={int(time.time() * 1000)}"
+                    if (ws / "voice_track.wav").exists()
                     else None
                 )
             ),
@@ -1067,6 +1072,17 @@ class DesktopAPIBridge:
                 item.pop("tts_file", None)
                 item.pop("tts_dur", None)
                 item["has_tts"] = False
+                if text_changed:
+                    try:
+                        from dubstudio.subtitles.cue_split import split_sentence_cues
+                        st_val = float(item.get("start", old_on_disk.get("start", 0.0)))
+                        en_val = float(item.get("end", old_on_disk.get("end", st_val + 1.0)))
+                        fresh_cues = split_sentence_cues(new_text, st_val, en_val)
+                        if fresh_cues:
+                            item["cues"] = fresh_cues
+                            item["sub_slices"] = [{"text": c["text"], "start": c["start"], "end": c["end"]} for c in fresh_cues]
+                    except Exception:
+                        pass
                 if seg_id is not None and tts_dir.exists():
                     try:
                         old_wav = tts_dir / f"{int(seg_id):04d}.wav"
@@ -1267,9 +1283,20 @@ class DesktopAPIBridge:
 
         from dubstudio.text.vi_normalize import normalize_for_tts
         if text is not None:
-            target_seg["vi_text"] = text.strip()
-            target_seg["text"] = text.strip()
-            target_seg["tts_text"] = normalize_for_tts(text.strip().replace("\n", " "))
+            clean_txt = text.strip()
+            target_seg["vi_text"] = clean_txt
+            target_seg["text"] = clean_txt
+            target_seg["tts_text"] = normalize_for_tts(clean_txt.replace("\n", " "))
+            try:
+                from dubstudio.subtitles.cue_split import split_sentence_cues
+                st_val = float(target_seg.get("start", 0.0))
+                en_val = float(target_seg.get("end", st_val + 1.0))
+                fresh_cues = split_sentence_cues(clean_txt, st_val, en_val)
+                if fresh_cues:
+                    target_seg["cues"] = fresh_cues
+                    target_seg["sub_slices"] = [{"text": c["text"], "start": c["start"], "end": c["end"]} for c in fresh_cues]
+            except Exception:
+                pass
 
         raw_tts = (target_seg.get("tts_text") or target_seg.get("vi_text") or target_seg.get("text") or "").strip()
         tts_text = normalize_for_tts(raw_tts.replace("\n", " "))
@@ -1688,6 +1715,10 @@ class DesktopAPIBridge:
                 cur_mix["vi_voice_volume"] = v_vol
                 cur_mix["bgm_volume"] = b_vol
                 cur_mix["orig_bgm_volume"] = b_vol
+                if "orig_voice_volume" in opts:
+                    ov_vol = float(opts.get("orig_voice_volume", 0)) / 100.0
+                    cur_mix["orig_voice_volume"] = ov_vol
+                    cur_mix["include_orig_voice"] = bool(ov_vol > 0.01)
                 if "custom_bgm_path" in opts:
                     cur_mix["custom_bgm_path"] = opts["custom_bgm_path"]
                     cur_mix["custom_bgm_volume"] = float(opts.get("custom_bgm_volume", 50)) / 100.0
