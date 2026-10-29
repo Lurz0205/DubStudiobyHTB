@@ -12,7 +12,7 @@ Toàn bộ các mô hình AI hạng nặng (tách nhạc nền, nhận dạng ti
 
 ---
 
-## 📥 Tải Bản Cài Đặt Sẵn Cho Windows (v2.0.0)
+## 📥 Tải Bản Cài Đặt Sẵn Cho Windows
 
 👉 **[Tải xuống bản cài đặt DubStudio mới nhất (DubStudio-win-Setup.exe)](https://github.com/Lurz0205/DubStudiobyHTB/releases/latest)**
 
@@ -22,7 +22,7 @@ Toàn bộ các mô hình AI hạng nặng (tách nhạc nền, nhận dạng ti
 
 ---
 
-## 🌟 Những Điểm Đột Phá Trên DubStudio v2.0.0
+## 🌟 Những Điểm Đột Phá Trên DubStudio v2.0
 
 ### 1. Kiến Trúc Next-Gen Studio — Trải Nghiệm Mượt Mà & Tinh Tế
 - **Thiết kế phẳng Neutral Charcoal Matte (`#121214` / `#161619`)**: Giao diện chuẩn studio chuyên nghiệp, không gây mỏi mắt, phân khu làm việc khoa học.
