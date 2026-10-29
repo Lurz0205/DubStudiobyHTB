@@ -162,6 +162,8 @@ def launch_browser_cdp(port: int = 9222, allow_restart: bool = False, hidden: bo
         f"--user-data-dir={profile_dir}",
         "--no-first-run",
         "--no-default-browser-check",
+        "--disable-session-crashed-bubble",
+        "--restore-last-session=0",
         "--disable-background-timer-throttling",
         "--disable-backgrounding-occluded-windows",
         "--disable-renderer-backgrounding",
@@ -243,6 +245,96 @@ def get_gemini_ws_url(port: int = 9222) -> str:
     raise DubError("Không tìm thấy tab Gemini (https://gemini.google.com/app) trong trình duyệt.")
 
 
+def close_gemini_tabs(port: int = 9222) -> int:
+    """Cleanly close open Gemini/Edge tabs via CDP /json/close/{target_id}."""
+    if not is_cdp_ready(port):
+        return 0
+
+    closed = 0
+    try:
+        url = f"http://127.0.0.1:{port}/json"
+        with httpx.Client(timeout=3.0) as client:
+            resp = client.get(url)
+            if resp.status_code == 200:
+                for t in resp.json():
+                    tid = t.get("id")
+                    t_url = t.get("url", "")
+                    if tid and (t.get("type") == "page" or "gemini.google.com" in t_url):
+                        try:
+                            cr = client.put(f"http://127.0.0.1:{port}/json/close/{tid}")
+                            if cr.status_code == 200:
+                                closed += 1
+                        except Exception:
+                            pass
+    except Exception:
+        pass
+    return closed
+
+
+def cycle_new_gemini_tab(port: int = 9222) -> str:
+    """Close existing Gemini tabs and open a brand new clean Gemini tab."""
+    if not is_cdp_ready(port):
+        launch_browser_cdp(port, hidden=True)
+        time.sleep(2.0)
+    else:
+        try:
+            url = f"http://127.0.0.1:{port}/json"
+            with httpx.Client(timeout=3.0) as client:
+                resp = client.get(url)
+                if resp.status_code == 200:
+                    for t in resp.json():
+                        tid = t.get("id")
+                        t_url = t.get("url", "")
+                        if tid and ("gemini.google.com" in t_url or t.get("type") == "page"):
+                            try:
+                                client.put(f"http://127.0.0.1:{port}/json/close/{tid}")
+                            except Exception:
+                                pass
+        except Exception:
+            pass
+        time.sleep(1.0)
+
+    new_url = f"http://127.0.0.1:{port}/json/new?https://gemini.google.com/app"
+    with httpx.Client(timeout=6.0) as client:
+        resp = client.put(new_url)
+        if resp.status_code == 200:
+            target = resp.json()
+            ws = target.get("webSocketDebuggerUrl")
+            if ws:
+                return ws
+
+    return get_gemini_ws_url(port)
+
+
+def is_gemini_refusal_or_invalid(raw_response: str) -> bool:
+    """Detect if Gemini output is an automated refusal or boilerplate refusal."""
+    if not raw_response or len(raw_response.strip()) < 5:
+        return True
+    lower = raw_response.lower()
+    refusal_phrases = [
+        "tôi chỉ là một mô hình ngôn ngữ",
+        "tôi là một mô hình ngôn ngữ",
+        "không thể trợ giúp về điều đó",
+        "không thể hỗ trợ về điều đó",
+        "không thể hỗ trợ",
+        "không thể thực hiện",
+        "tôi không thể giúp",
+        "chính sách an toàn",
+        "tiêu chuẩn cộng đồng",
+        "i am a large language model",
+        "i am an ai",
+        "cannot help with that",
+        "can't help with that",
+        "cannot assist",
+        "can't assist",
+        "i cannot fulfill",
+        "something went wrong",
+        "đã xảy ra sự cố",
+        "bạn đã dừng câu trả lời này",
+    ]
+    return any(p in lower for p in refusal_phrases)
+
+
 class CDPClient:
     """Lightweight asynchronous WebSocket CDP client."""
 
@@ -289,10 +381,15 @@ class CDPClient:
         return res.get("result", {}).get("value")
 
 
-async def _async_send_prompt_to_gemini(prompt: str, port: int = 9222, timeout: float = 90.0) -> str:
+async def _async_send_prompt_to_gemini(
+    prompt: str,
+    port: int = 9222,
+    timeout: float = 90.0,
+    ws_url: Optional[str] = None,
+) -> str:
     """Send prompt to Gemini Web via CDP and wait for generation completion with full error detection."""
-    ws_url = get_gemini_ws_url(port)
-    client = CDPClient(ws_url)
+    ws = ws_url or get_gemini_ws_url(port)
+    client = CDPClient(ws)
     await client.connect()
 
     try:
@@ -718,30 +815,75 @@ def extract_json_translations(raw_text: str) -> List[Dict[str, Any]]:
     return []
 
 
-def translate_via_cdp(prompt_text: str, port: int = 9222, timeout: float = 90.0) -> List[Dict[str, Any]]:
+def translate_via_cdp(
+    prompt_text: str,
+    port: int = 9222,
+    timeout: float = 90.0,
+    max_retries: int = 3,
+) -> List[Dict[str, Any]]:
     """
     Synchronous entry point to translate via Gemini Web CDP automation.
-    Ensures browser is alive, sends prompt, waits for response, and parses JSON output.
+    Includes automated rescue mechanism:
+    If Gemini refuses (e.g. 'Tôi chỉ là một mô hình ngôn ngữ...'), encounters an error,
+    or fails to output valid JSON, it cleanly closes the old tab, opens a fresh new tab,
+    and retries up to 3 times before reporting an error to the user.
     """
-    if not is_cdp_ready(port):
-        launched = launch_browser_cdp(port, hidden=True)
-        if not launched:
-            raise DubError(
-                "Chưa phát hiện trình duyệt mở cổng 9222. "
-                "Vui lòng nhấn nút 'Mở trình duyệt Gemini' trong Cài đặt."
+    last_err_text = ""
+    for attempt in range(1, max_retries + 1):
+        if not is_cdp_ready(port):
+            launched = launch_browser_cdp(port, hidden=True)
+            if not launched:
+                raise DubError(
+                    "Chưa phát hiện trình duyệt mở cổng 9222. "
+                    "Vui lòng nhấn nút 'Mở trình duyệt Gemini' trong Cài đặt."
+                )
+            time.sleep(2.0)
+
+        ws_url = None
+        if attempt > 1:
+            emit_event(
+                "translate",
+                0.0,
+                f"Gemini Web từ chối hoặc gặp lỗi. Đang đóng tab cũ và mở tab mới gửi lại (Lần thử {attempt}/{max_retries})...",
+                level="warning",
             )
+            try:
+                ws_url = cycle_new_gemini_tab(port)
+                time.sleep(2.5)
+            except Exception as e:
+                print(f"[CDP] cycle_new_gemini_tab warning: {e}", flush=True)
 
-    raw_response = asyncio.run(_async_send_prompt_to_gemini(prompt_text, port=port, timeout=timeout))
-    results = extract_json_translations(raw_response)
-    if not results:
-        lower_raw = (raw_response or "").lower()
-        if any(w in lower_raw for w in ["something went wrong", "đã xảy ra sự cố", "quá tải", "giới hạn", "chính sách"]):
-            raise DubError(f"Gemini Web báo lỗi hoặc từ chối phản hồi: {raw_response[:200]}")
-        raise DubError(
-            f"Gemini Web chưa trả về đúng cấu trúc JSON danh sách câu dịch. Nội dung nhận được: {raw_response[:200]}"
-        )
+        try:
+            raw_response = asyncio.run(_async_send_prompt_to_gemini(prompt_text, port=port, timeout=timeout, ws_url=ws_url))
+        except Exception as e:
+            last_err_text = str(e)
+            print(f"[CDP] Attempt {attempt} exception: {e}", flush=True)
+            if attempt < max_retries:
+                time.sleep(1.0)
+                continue
+            raise DubError(f"Gemini Web gặp lỗi sau {max_retries} lần thử: {last_err_text}")
 
-    return results
+        # Check refusal
+        if is_gemini_refusal_or_invalid(raw_response):
+            last_err_text = f"Gemini phản hồi từ chối: '{raw_response.strip()[:120]}'"
+            print(f"[CDP] Attempt {attempt} refusal: {last_err_text}", flush=True)
+            if attempt < max_retries:
+                time.sleep(1.0)
+                continue
+
+        results = extract_json_translations(raw_response)
+        if results:
+            return results
+
+        last_err_text = f"Không tìm thấy dữ liệu JSON hợp lệ. Nhận được: '{raw_response[:120]}'"
+        print(f"[CDP] Attempt {attempt} invalid JSON: {last_err_text}", flush=True)
+        if attempt < max_retries:
+            time.sleep(1.0)
+            continue
+
+    raise DubError(
+        f"Gemini Web không thể hoàn thành sau {max_retries} lần thử mở tab mới ({last_err_text}). Vui lòng kiểm tra lại tài khoản hoặc đổi phương thức dịch."
+    )
 
 
 async def _async_check_gemini_status(port: int = 9222, timeout: float = 6.0) -> tuple[bool, str]:

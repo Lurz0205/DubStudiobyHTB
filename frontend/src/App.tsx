@@ -34,6 +34,7 @@ export const App: React.FC = () => {
   const [aspectRatio, setAspectRatio] = useState<string>('original');
   const [voiceVol, setVoiceVol] = useState<number>(100);
   const [bgmVol, setBgmVol] = useState<number>(100);
+  const [vocalsUrl, setVocalsUrl] = useState<string | undefined>(undefined);
 
   // Subtitle styling matching v1.1.3 style.json 100%
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>({
@@ -169,7 +170,26 @@ export const App: React.FC = () => {
           const bUrl = data.bgm_url || (data.has_bgm ? `${data.media_base_url}/audio/bgm.wav?t=${Date.now()}` : undefined);
           setVoiceSrc(vUrl);
           setBgmSrc(bUrl);
+          setVocalsUrl(data.vocals_url || undefined);
         }
+
+        const defaultStyle: SubtitleStyle = {
+          font_name: 'Arial',
+          fontSize: 26,
+          font_size: 26,
+          primary_color: '#FFFFFF',
+          outline_color: '#000000',
+          outline_width: 2,
+          has_box: true,
+          box_color: '#000000',
+          box_opacity: 0.6,
+          box_radius: 6,
+          box_mode: 'full_width',
+          box_width_pct: 85,
+          position: 'bottom',
+          marginV: 35,
+          margin_v: 35,
+        };
 
         if (data.style) {
           if (typeof data.style.voice_volume === 'number') {
@@ -180,12 +200,18 @@ export const App: React.FC = () => {
             const bVal = data.style.bgm_volume;
             setBgmVol(bVal <= 2.0 && bVal > 0 ? Math.round(bVal * 100) : bVal);
           }
-          setSubtitleStyle((prev) => ({
-            ...prev,
+          setSubtitleStyle({
+            ...defaultStyle,
             ...data.style,
-            fontSize: data.style.font_size || data.style.fontSize || prev.fontSize,
-            marginV: data.style.margin_v || data.style.marginV || prev.marginV,
-          }));
+            fontSize: data.style.font_size || data.style.fontSize || defaultStyle.fontSize,
+            marginV: data.style.margin_v || data.style.marginV || defaultStyle.marginV,
+            keep_original_ranges: Array.isArray(data.style.keep_original_ranges) ? data.style.keep_original_ranges : [],
+          });
+        } else {
+          setSubtitleStyle({
+            ...defaultStyle,
+            keep_original_ranges: [],
+          });
         }
       }
     } catch (e) {
@@ -326,6 +352,7 @@ export const App: React.FC = () => {
               videoSrc={videoSrc}
               voiceSrc={voiceSrc}
               bgmSrc={bgmSrc}
+              origVoiceSrc={vocalsUrl}
               cues={cues}
               onCuesChange={setCues}
               subtitleStyle={subtitleStyle}

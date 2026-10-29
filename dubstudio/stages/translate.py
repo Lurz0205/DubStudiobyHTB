@@ -15,13 +15,13 @@ def _split_one_segment(seg: dict) -> list[dict]:
     dur = round(en - st, 3)
 
     words = vi_text.split()
-    # Segment is too long if:
-    # 1. dur > 7.0 seconds
-    # 2. OR dur >= 4.5 seconds AND (len(vi_text) > 48 or len(words) >= 11)
-    # Never split segments with dur <= 3.2s or words <= 7
-    if dur <= 3.2 or len(words) <= 7:
+    # Only split truly long compound sentences:
+    # 1. dur > 8.5 seconds
+    # 2. OR dur >= 5.5 seconds AND (len(vi_text) > 65 or len(words) >= 15)
+    # Never split conversational sentences with dur <= 4.0s or words <= 9
+    if dur <= 4.0 or len(words) <= 9:
         return [seg]
-    if not (dur > 7.0 or (dur >= 4.5 and (len(vi_text) > 48 or len(words) >= 11))):
+    if not (dur > 8.5 or (dur >= 5.5 and (len(vi_text) > 65 or len(words) >= 15))):
         return [seg]
 
     mid = len(vi_text) // 2
@@ -46,32 +46,7 @@ def _split_one_segment(seg: dict) -> list[dict]:
                     best_score = score
                     best_idx = idx
 
-    # 3. Search for conjunctions
-    if best_idx == -1 or (best_score > len(vi_text) * 0.35):
-        for conj in [" nhưng ", " mà ", " nên ", " vì ", " và ", " rồi ", " thì ", " hoặc ", " nếu ", " để "]:
-            pos = 0
-            while True:
-                found = vi_text.find(conj, pos)
-                if found == -1:
-                    break
-                idx = found + 1
-                if idx > len(vi_text) * 0.2 and idx < len(vi_text) * 0.8:
-                    score = abs(idx - mid) * 1.2
-                    if score < best_score:
-                        best_score = score
-                        best_idx = idx
-                pos = found + len(conj)
-
-    # 4. Fallback: split at nearest word boundary
-    if best_idx == -1:
-        for m in re.finditer(r'\s+', vi_text):
-            idx = m.end()
-            if idx > len(vi_text) * 0.25 and idx < len(vi_text) * 0.75:
-                score = abs(idx - mid) * 1.5
-                if score < best_score:
-                    best_score = score
-                    best_idx = idx
-
+    # If no natural punctuation mark exists, DO NOT split arbitrarily across words (preserves syntactic integrity)
     if best_idx <= 0 or best_idx >= len(vi_text):
         return [seg]
 
@@ -87,8 +62,8 @@ def _split_one_segment(seg: dict) -> list[dict]:
     dur1 = round(dur * ratio, 2)
     split_t = round(st + dur1, 2)
 
-    # Enforce minimum segment duration 1.4s and at least 4 words per part
-    if split_t - st < 1.4 or en - split_t < 1.4 or w1 < 4 or w2 < 4:
+    # Enforce minimum segment duration 2.0s and at least 4 words per part to avoid dangling short clips
+    if split_t - st < 2.0 or en - split_t < 2.0 or w1 < 4 or w2 < 4:
         return [seg]
 
     # Split Chinese text proportionally
@@ -464,8 +439,9 @@ def run_manual_translation(
         f"Phong cách dịch mong muốn: {style}\n\n"
         "Quy tắc quan trọng:\n"
         "1. Dịch chuẩn xác, thuần Việt, tự nhiên, câu cú mượt mà như người bản xứ nói chuyện.\n"
-        "2. Không bao giờ ngắt câu lửng lơ ở các từ so sánh, bắc cầu (như 'tương đương', 'so với', 'dẫn đến', 'hoạt động cùng lúc').\n"
-        "3. Bắt buộc giữ nguyên số thứ tự [id] của từng câu ở đầu dòng để hệ thống tự động ghép phụ đề.\n\n"
+        "2. TỰ BẢO ĐẢM TÍNH TOÀN VẸN CÂU: Mỗi đơn vị [id] bắt buộc là một câu/ý hoàn chỉnh độc lập (đầy đủ Chủ ngữ - Vị ngữ). Không bao giờ ngắt câu lửng lơ ở danh từ, động từ dở dang, liên từ hoặc giới từ (như 'nhờ lớp dán nhám trên bề mặt', 'tương đương', 'so với', 'dẫn đến', 'cùng với').\n"
+        "3. TỰ BÙ HOÀN CÂU THEO NGỮ CẢNH: Nếu câu gốc bị ngắt nhịp giữa chừng, câu sau bắt buộc phải tự động thêm chủ ngữ/từ nối tự nhiên (ví dụ câu trước '...nhờ lớp dán nhám trên bề mặt này', câu sau 'Lớp dán này giúp làm mờ bớt nếp gấp...'; tuyệt đối không bắt đầu câu sau bằng vị ngữ cụt lủn không chủ ngữ).\n"
+        "4. Bắt buộc giữ nguyên số thứ tự [id] của từng câu ở đầu dòng để hệ thống tự động ghép phụ đề.\n\n"
         "Định dạng trả lời mẫu:\n"
         "[1] Nội dung câu dịch 1\n"
         "[2] Nội dung câu dịch 2\n"
@@ -727,4 +703,11 @@ def run(job: JobContext, cfg: AppConfig) -> None:
     outputs = ["units.json", "segments.json"] if using_units else ["segments.json"]
     job.finish_stage(stage_name, outputs)
     emit_event(stage_name, 100.0, f"Đã dịch thành công và tối ưu độ dài cho toàn bộ {len(translated_items)} câu thoại")
+
+    # Cleanly close Gemini tab via CDP after translation completes
+    try:
+        from dubstudio.llm.cdp_gemini import close_gemini_tabs
+        close_gemini_tabs(getattr(cfg.translation, "cdp_port", 9222))
+    except Exception:
+        pass
 

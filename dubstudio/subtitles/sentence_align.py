@@ -85,10 +85,10 @@ def stitch_dangling_clauses(segments: List[Dict[str, Any]]) -> List[Dict[str, An
                 s_next["vi_text"] = new_next_vi
                 s_next["tts_text"] = new_next_vi
 
-                # Adjust next segment start time
+                # Preserve next segment start time so it never unnaturally touches previous segment
                 next_st = float(s_next.get("start", en))
-                s_next["start"] = round(max(s_curr["end"], next_st - shift_time), 3)
-                s_next["dur"] = round(float(s_next.get("end", s_next["start"] + 1.0)) - s_next["start"], 3)
+                s_next["start"] = next_st
+                s_next["dur"] = round(float(s_next.get("end", next_st + 1.0)) - next_st, 3)
 
                 sanitized_main = sanitize_spoken_vietnamese(main_sentence)
                 s_curr["vi_text"] = sanitized_main

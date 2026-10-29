@@ -45,7 +45,8 @@ FIXED_PHRASES = [
     "thời gian", "không gian", "con người", "cuộc sống", "thế giới", "gia đình",
     "công việc", "học tập", "nghiên cứu", "phát triển", "sản xuất", "sử dụng",
     "hoạt động", "kiểm tra", "thử nghiệm", "kết quả", "nguyên nhân", "giải pháp",
-    "khả năng", "tình trạng", "mức độ", "tối đa", "tối thiểu", "trung bình"
+    "khả năng", "tình trạng", "mức độ", "tối đa", "tối thiểu", "trung bình",
+    "thẹn với lòng", "hổ thẹn", "thẹn thùng"
 ]
 
 FORBIDDEN_END_WORDS = {
@@ -56,10 +57,11 @@ FORBIDDEN_END_WORDS = {
     "hơn", "kém", "gấp", "khoảng", "chừng", "mỗi", "mọi", "từng"
 }
 
-# Các từ nếu đứng ĐẦU dòng mới sẽ rất tự nhiên (được thưởng điểm cắt trước nó)
+# Các liên từ khởi đầu mệnh đề tự nhiên (thưởng điểm cắt trước nó)
+# Tuyệt đối không đưa giới từ (với, trong, tại...) vào đây vì dễ làm gãy cụm động từ/vị ngữ!
 CLAUSE_STARTERS = {
-    "nhưng", "mà", "nên", "vì", "bởi", "khi", "nếu", "rồi", "thì", "còn", "song",
-    "tuy", "dù", "để", "cho", "với", "tại", "trong", "trên", "ngoài", "sau", "trước"
+    "nhưng", "mà", "nên", "vì", "bởi", "khi", "nếu", "song",
+    "tuy", "dù", "hoặc", "chứ"
 }
 
 UNIT_WORDS = {
@@ -330,28 +332,42 @@ def _split_single_sentence_dp(
                     if not (words[j - 1] and words[j - 1][-1] in PUNCT_COMMA_SET):
                         cost += 500.0
 
+            # Chi phí cơ bản cho mỗi lần ngắt dòng (ưu tiên ít dòng hơn khi số từ còn nằm trong dung sai)
+            if not is_last_line:
+                cost += 50.0
+
             # 3. Hàm phạt độ dài chuẩn hóa (Normalized Length Penalty)
-            # Thay vì phạt nặng khi nhỏ hơn target_n, ta cho phép vùng linh hoạt [ideal_len - 2, target_n + 1]
             if length > max_words_hard:
                 cost += 300.0 + (length - max_words_hard) * 150.0
             else:
-                # Khoảng cách tương đối so với độ dài cân bằng
-                ref_target = ideal_len if total_words < target_n * 2 else target_n
-                diff = abs(length - ref_target) / max(1.0, float(ref_target))
+                # Bám sát số từ target_n người dùng lựa chọn
+                diff = abs(length - target_n) / max(1.0, float(target_n))
                 cost += (diff ** 2) * 80.0
 
-                # Phạt nhẹ nếu dòng hơi ngắn (dưới 50% target_n) để chống tách vụn 4-5 từ khi chọn 12 từ
-                if length < max(4, int(target_n * 0.55)):
-                    cost += (int(target_n * 0.55) - length) * 45.0
+                # Phạt nhẹ nếu dòng trung gian hơi ngắn (dưới 50% target_n) để chống tách vụn
+                # Không phạt nếu dòng này bắt đầu ngay sau dấu phẩy/chấm (vì đó là ranh giới câu tự nhiên)
+                is_after_punct = (i > 0 and words[i - 1] and words[i - 1][-1] in (PUNCT_COMMA_SET | PUNCT_TERMINAL_SET))
+                if not is_last_line and not is_after_punct and length < max(3, int(target_n * 0.5)):
+                    cost += (int(target_n * 0.5) - length) * 35.0
 
             # 4. Phạt dòng mồ côi ở cuối câu (Orphan words)
             if is_last_line and length < min_words_hard:
-                if length == 1:
-                    cost += 1200.0
-                elif length == 2:
-                    cost += 600.0
+                is_after_punct = (i > 0 and words[i - 1] and words[i - 1][-1] in (PUNCT_COMMA_SET | PUNCT_TERMINAL_SET))
+                if is_after_punct:
+                    # Vế câu độc lập hợp lệ sau dấu phẩy (VD: "thế được chưa.", "đúng không nào.")
+                    if length == 1:
+                        cost += 400.0
+                    elif length == 2:
+                        cost += 40.0
+                    else:
+                        cost += 0.0  # 3 từ trở lên sau dấu phẩy là một vế câu hoàn toàn tự nhiên!
                 else:
-                    cost += 250.0
+                    if length == 1:
+                        cost += 1200.0
+                    elif length == 2:
+                        cost += 600.0
+                    else:
+                        cost += 250.0
 
             # 5. Điểm thưởng (Bonus) tại các ranh giới ngữ pháp tự nhiên
             if j < total_words:
@@ -363,14 +379,13 @@ def _split_single_sentence_dp(
                 is_clause_starter = (next_token_clean in CLAUSE_STARTERS)
 
                 if has_term_punct:
-                    cost -= 120.0
+                    cost -= 150.0
                 elif has_comma_punct:
-                    # Thưởng lớn khi ngắt đúng dấu phẩy, NHƯNG chỉ thưởng tối đa khi dòng đã đủ dài (>= 50% target_n)
-                    # Điều này ngăn việc ngắt ở dấu phẩy quá sớm tạo ra câu 3-4 từ!
-                    if length >= max(3, int(target_n * 0.5)):
-                        cost -= 95.0
+                    # Thưởng rất lớn khi ngắt đúng dấu phẩy khi dòng đã đạt độ dài hợp lý (>= 40% target_n)
+                    if length >= max(3, int(target_n * 0.4)):
+                        cost -= 180.0
                     else:
-                        cost -= 15.0
+                        cost -= 30.0
 
                 if is_clause_starter:
                     cost -= 35.0

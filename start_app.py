@@ -613,6 +613,7 @@ class DesktopAPIBridge:
             "preview_video_url": preview_video_url,
             "has_raw_voice": (ws / "voice_raw.wav").exists() or (ws / "voice_track.wav").exists(),
             "has_bgm": (ws / "audio" / "bgm.wav").exists(),
+            "has_vocals": (ws / "audio" / "vocals.wav").exists() or (ws / "audio" / "orig.wav").exists(),
             "voice_url": (
                 f"/media/workspace/{job_id}/voice_raw.wav?t={int(time.time() * 1000)}"
                 if (ws / "voice_raw.wav").exists()
@@ -627,8 +628,41 @@ class DesktopAPIBridge:
                 if (ws / "audio" / "bgm.wav").exists()
                 else None
             ),
+            "vocals_url": (
+                f"/media/workspace/{job_id}/audio/vocals.wav?t={int(time.time() * 1000)}"
+                if (ws / "audio" / "vocals.wav").exists()
+                else (
+                    f"/media/workspace/{job_id}/audio/orig.wav?t={int(time.time() * 1000)}"
+                    if (ws / "audio" / "orig.wav").exists()
+                    else None
+                )
+            ),
             "media_base_url": f"/media/workspace/{job_id}",
         }
+
+        # Resilient video duration calculation
+        video_dur = 0.0
+        probe_f = ws / "probe.json"
+        if probe_f.exists():
+            try:
+                p_data = json.loads(probe_f.read_text(encoding="utf-8"))
+                video_dur = float(p_data.get("format", {}).get("duration", 0.0) or 0.0)
+            except Exception:
+                pass
+        if video_dur <= 0.0 and (ws / "segments.json").exists():
+            try:
+                seg_f = json.loads((ws / "segments.json").read_text(encoding="utf-8"))
+                video_dur = float(seg_f.get("video", {}).get("duration", 0.0) or 0.0)
+            except Exception:
+                pass
+        if video_dur <= 0.0 and (ws / "input.mp4").exists():
+            try:
+                from dubstudio.ffmpeg_utils import probe_media
+                p_info = probe_media(ws / "input.mp4")
+                video_dur = float(p_info.get("format", {}).get("duration", 0.0) or 0.0)
+            except Exception:
+                pass
+        result["duration"] = round(video_dur, 2)
 
         # Segments (Multi-source resilient loader: segments.json -> units.json -> raw_segments.json -> asr.json)
         raw_segments = []
@@ -927,6 +961,13 @@ class DesktopAPIBridge:
                     except Exception:
                         pass
 
+                # Cleanly close Gemini browser tab after subtitle translation / fit completion
+                try:
+                    from dubstudio.llm.cdp_gemini import close_gemini_tabs
+                    close_gemini_tabs(9222)
+                except Exception:
+                    pass
+
                 self.emit_event_to_ui({
                     "stage": "done",
                     "progress": 100.0,
@@ -1067,22 +1108,47 @@ class DesktopAPIBridge:
                 item["muted_tts"] = m_tts
 
             # Invalidate TTS artifacts ONLY if content (text, voice, speed) was genuinely modified!
-            if content_changed:
-                item["tts_hash"] = None
-                item.pop("tts_file", None)
-                item.pop("tts_dur", None)
-                item["has_tts"] = False
-                if text_changed:
+            old_st = float(old_on_disk.get("start", item.get("start", 0.0)))
+            old_en = float(old_on_disk.get("end", item.get("end", old_st + 1.0)))
+            st_val = float(item.get("start", old_st))
+            en_val = float(item.get("end", old_en))
+            time_changed = abs(st_val - old_st) > 0.01 or abs(en_val - old_en) > 0.01
+
+            # Tự động cân chỉnh lại thời gian hiển thị giữa các phần tách nhỏ (cues/sub_slices) khi đổi thời lượng câu
+            if time_changed or text_changed:
+                existing_cues = item.get("cues") or old_on_disk.get("cues")
+                lines = [l.strip() for l in new_text.split("\n") if l.strip()]
+                if not text_changed and time_changed and existing_cues and isinstance(existing_cues, list) and len(existing_cues) == len(lines) and len(lines) > 1:
+                    old_dur = max(0.05, old_en - old_st)
+                    new_dur = max(0.05, en_val - st_val)
+                    scaled_cues = []
+                    for sc in existing_cues:
+                        sc_st = float(sc.get("start", old_st))
+                        sc_en = float(sc.get("end", old_en))
+                        rel_st = max(0.0, min(1.0, (sc_st - old_st) / old_dur))
+                        rel_en = max(0.0, min(1.0, (sc_en - old_st) / old_dur))
+                        scaled_cues.append({
+                            "text": sc.get("text", ""),
+                            "start": round(st_val + rel_st * new_dur, 3),
+                            "end": round(st_val + rel_en * new_dur, 3),
+                        })
+                    item["cues"] = scaled_cues
+                    item["sub_slices"] = list(scaled_cues)
+                elif text_changed or (len(lines) > 1 and not existing_cues):
                     try:
                         from dubstudio.subtitles.cue_split import split_sentence_cues
-                        st_val = float(item.get("start", old_on_disk.get("start", 0.0)))
-                        en_val = float(item.get("end", old_on_disk.get("end", st_val + 1.0)))
                         fresh_cues = split_sentence_cues(new_text, st_val, en_val)
                         if fresh_cues:
                             item["cues"] = fresh_cues
                             item["sub_slices"] = [{"text": c["text"], "start": c["start"], "end": c["end"]} for c in fresh_cues]
                     except Exception:
                         pass
+
+            if content_changed:
+                item["tts_hash"] = None
+                item.pop("tts_file", None)
+                item.pop("tts_dur", None)
+                item["has_tts"] = False
                 if seg_id is not None and tts_dir.exists():
                     try:
                         old_wav = tts_dir / f"{int(seg_id):04d}.wav"
@@ -1558,15 +1624,21 @@ class DesktopAPIBridge:
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
+    def get_app_version(self) -> str:
+        """Return the current DubStudio version string."""
+        from dubstudio.version import APP_VERSION
+        return APP_VERSION
+
     def check_for_updates(self) -> Dict[str, Any]:
         """Check GitHub for newer releases using Velopack/Release manifest."""
         try:
             from dubstudio.updater import check_all_updates
+            from dubstudio.version import APP_VERSION
             res = check_all_updates(timeout=4.0)
             return {
                 "has_update": bool(res.get("has_app_update")),
-                "current_version": res.get("current_version", "2.0.0"),
-                "latest_version": res.get("latest_version", "2.0.0"),
+                "current_version": res.get("current_version", APP_VERSION),
+                "latest_version": res.get("latest_version", APP_VERSION),
                 "release_notes": res.get("release_notes", ""),
                 "download_url": res.get("download_url", ""),
                 "setup_asset_url": res.get("setup_asset_url", ""),
@@ -1716,9 +1788,11 @@ class DesktopAPIBridge:
                 cur_mix["bgm_volume"] = b_vol
                 cur_mix["orig_bgm_volume"] = b_vol
                 if "orig_voice_volume" in opts:
-                    ov_vol = float(opts.get("orig_voice_volume", 0)) / 100.0
+                    raw_ov = float(opts.get("orig_voice_volume", 0))
+                    ov_vol = (raw_ov / 100.0) if raw_ov > 1.0 else raw_ov
+                    ov_vol = max(0.0, min(1.0, ov_vol))
                     cur_mix["orig_voice_volume"] = ov_vol
-                    cur_mix["include_orig_voice"] = bool(ov_vol > 0.01)
+                    cur_mix["include_orig_voice"] = bool(ov_vol > 0.005)
                 if "custom_bgm_path" in opts:
                     cur_mix["custom_bgm_path"] = opts["custom_bgm_path"]
                     cur_mix["custom_bgm_volume"] = float(opts.get("custom_bgm_volume", 50)) / 100.0

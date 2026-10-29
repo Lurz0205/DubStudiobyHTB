@@ -113,6 +113,13 @@ def normalize_text(text: str) -> str:
 
     res = text
 
+    # 0. Number ranges: 20-30 -> 20 đến 30
+    res = re.sub(
+        r"(\d+(?:[.,]\d+)?)\s*[-~–—]\s*(\d+(?:[.,]\d+)?)",
+        r"\1 đến \2",
+        res,
+    )
+
     # 1. Percentages: 50% -> 50 phần trăm
     res = re.sub(
         r"(\d+(?:[.,]\d+)?)\s*%",
@@ -127,10 +134,29 @@ def normalize_text(text: str) -> str:
         lambda m: f"{read_decimal(m.group(2))} {CURRENCY_MAP.get(m.group(1), '')}",
         res,
     )
-    # 100 USD / 100 VND / 100 đ
+    # 100 USD / 100 VND / 100 đ (bound with non-word or end of string so 'đ' never matches 'độ')
     res = re.sub(
-        r"(\d+(?:[.,]\d+)?)\s*(USD|VND|NDT|đ)",
+        r"(\d+(?:[.,]\d+)?)\s*(USD|VND|NDT|đ)(?=[^\w]|$)",
         lambda m: f"{read_decimal(m.group(1))} {CURRENCY_MAP.get(m.group(2), m.group(2))}",
+        res,
+    )
+
+    # 2b. Degrees / Temperature: 20°C, 30° -> 20 độ C, 30 độ
+    res = re.sub(
+        r"(\d+(?:[.,]\d+)?)\s*(?:°C|℃)",
+        lambda m: f"{read_decimal(m.group(1))} độ C",
+        res,
+        flags=re.IGNORECASE,
+    )
+    res = re.sub(
+        r"(\d+(?:[.,]\d+)?)\s*°F",
+        lambda m: f"{read_decimal(m.group(1))} độ F",
+        res,
+        flags=re.IGNORECASE,
+    )
+    res = re.sub(
+        r"(\d+(?:[.,]\d+)?)\s*°(?=[^\w]|$)",
+        lambda m: f"{read_decimal(m.group(1))} độ",
         res,
     )
 

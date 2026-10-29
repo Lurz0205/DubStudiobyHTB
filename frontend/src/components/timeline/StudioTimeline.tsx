@@ -73,6 +73,12 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms}`;
   };
 
+  const formatRulerTime = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
   // Close context menu on global click
   useEffect(() => {
     const handleClick = () => setContextMenu(null);
@@ -96,8 +102,8 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
   const totalTrackWidth = Math.max(containerWidth, containerWidth * zoom);
   const pxPerSec = totalTrackWidth / safeDuration;
 
-  // Generate ruler tick marks
-  const tickInterval = zoom >= 4 ? 1 : (zoom >= 2 ? 2 : 5); // seconds
+  // Generate ruler tick marks: major mark every 5s with number, minor ticks every 1s when zoomed
+  const tickInterval = zoom >= 2 ? 1 : 5; // seconds
   const ticks: number[] = [];
   for (let t = 0; t <= safeDuration; t += tickInterval) {
     ticks.push(t);
@@ -210,6 +216,17 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
 
   const handleRulerMouseDown = (e: React.MouseEvent) => {
     if (!scrollContainerRef.current) return;
+    const rect = scrollContainerRef.current.getBoundingClientRect();
+
+    // Ngăn chặn hoàn toàn việc tua video (seek) khi người dùng nhấp hoặc kéo thanh cuộn ngang ở đáy
+    const scrollbarHeight = scrollContainerRef.current.offsetHeight - scrollContainerRef.current.clientHeight;
+    if (
+      (scrollbarHeight > 0 && e.clientY >= rect.top + scrollContainerRef.current.clientHeight) ||
+      e.clientY >= rect.bottom - 15
+    ) {
+      return;
+    }
+
     if (e.button === 2) {
       // Right click drag on empty space: pan scroll timeline
       e.preventDefault();
@@ -221,7 +238,6 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
       return;
     }
     if (e.button !== 0) return;
-    const rect = scrollContainerRef.current.getBoundingClientRect();
     const xInContainer = e.clientX - rect.left + scrollContainerRef.current.scrollLeft;
     const timeAtCursor = Math.max(0, Math.min(safeDuration, xInContainer / pxPerSec));
     onSeek(timeAtCursor);
@@ -330,16 +346,21 @@ export const StudioTimeline: React.FC<StudioTimelineProps> = ({
           <div className="w-full h-6 bg-[#18181C] border-b border-white/[0.06] relative cursor-pointer flex items-center">
             {ticks.map((t) => {
               const x = t * pxPerSec;
+              const isMajor = Math.round(t) % 5 === 0;
               return (
                 <div
                   key={t}
                   style={{ left: `${x}px` }}
                   className="absolute top-0 bottom-0 flex flex-col justify-between pointer-events-none"
                 >
-                  <span className="text-[9px] text-zinc-400 pl-1 leading-none">
-                    {formatTime(t)}
-                  </span>
-                  <div className="w-[1px] h-2 bg-zinc-600" />
+                  {isMajor ? (
+                    <span className="text-[9px] text-zinc-400 pl-1 leading-none font-medium">
+                      {formatRulerTime(t)}
+                    </span>
+                  ) : (
+                    <span className="h-3" />
+                  )}
+                  <div className={`w-[1px] ${isMajor ? 'h-2.5 bg-zinc-500' : 'h-1.5 bg-zinc-700/60'}`} />
                 </div>
               );
             })}

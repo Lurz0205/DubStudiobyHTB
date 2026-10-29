@@ -24,6 +24,7 @@ export interface SubtitleStyle {
   margin_v?: number;
   paddingX?: number;
   paddingY?: number;
+  keep_original_ranges?: [number, number][];
 }
 
 export interface ColorBoxItem {
@@ -71,6 +72,8 @@ export interface WYSIWYGPlayerProps {
   voiceVol?: number;
   bgmVol?: number;
   origRanges?: { start: number; end: number }[];
+  origVoiceSrc?: string;
+  origVoiceVol?: number;
   customBgmSrc?: string;
   customBgmVol?: number;
   currentTime: number;
@@ -118,6 +121,8 @@ export const WYSIWYGPlayer: React.FC<WYSIWYGPlayerProps> = ({
   voiceVol = 100,
   bgmVol = 100,
   origRanges = [],
+  origVoiceSrc,
+  origVoiceVol = 0,
   customBgmSrc,
   customBgmVol = 50,
   currentTime,
@@ -135,6 +140,7 @@ export const WYSIWYGPlayer: React.FC<WYSIWYGPlayerProps> = ({
   const voiceAudioRef = useRef<HTMLAudioElement>(null);
   const bgmAudioRef = useRef<HTMLAudioElement>(null);
   const customBgmAudioRef = useRef<HTMLAudioElement>(null);
+  const origVoiceAudioRef = useRef<HTMLAudioElement>(null);
 
   const [videoDim, setVideoDim] = useState({ w: 1920, h: 1080 });
   const [innerRect, setInnerRect] = useState({ left: 0, top: 0, width: 0, height: 0, scale: 1 });
@@ -217,14 +223,26 @@ export const WYSIWYGPlayer: React.FC<WYSIWYGPlayerProps> = ({
       return isMuted && curTime >= c.start && curTime <= c.end;
     });
 
-    if (!voiceSrc && !bgmSrc && !customBgmSrc) {
+    // 1) SUBTITLE / PRE-DUBBING MODE (no voiceSrc available):
+    // The user is watching/editing subtitles for the original video.
+    // Video native audio MUST be unmuted and played at 1.0 volume!
+    if (!voiceSrc) {
       if (videoRef.current) {
         videoRef.current.volume = 1.0;
         videoRef.current.muted = false;
       }
+      if (bgmAudioRef.current) {
+        bgmAudioRef.current.volume = 0.0;
+        bgmAudioRef.current.muted = true;
+      }
+      if (origVoiceAudioRef.current) {
+        origVoiceAudioRef.current.volume = 0.0;
+        origVoiceAudioRef.current.muted = true;
+      }
       return;
     }
 
+    // 2) DUBBED MODE (voiceSrc exists):
     const inOrig = (origRanges && origRanges.some((r) => curTime >= r.start && curTime <= r.end)) || isMutedTtsCue;
     if (inOrig) {
       // During origRanges (Giữ âm gốc) or when TTS is muted: video original audio is unmuted at 1.0
@@ -235,14 +253,30 @@ export const WYSIWYGPlayer: React.FC<WYSIWYGPlayerProps> = ({
       if (bgmAudioRef.current) {
         bgmAudioRef.current.volume = Math.min(1.0, (bgmVol / 100.0) * (isMutedTtsCue ? 1.0 : 0.15));
       }
+      if (origVoiceAudioRef.current) {
+        origVoiceAudioRef.current.volume = 0.0;
+        origVoiceAudioRef.current.muted = true;
+      }
     } else {
-      // Normal dubbing: video original audio is muted (0.0); BGM plays at full user volume
+      // Normal dubbing: video original audio is muted (0.0) unless origVoiceVol is set and no separate vocals stem
       if (videoRef.current) {
-        videoRef.current.volume = 0.0;
-        videoRef.current.muted = true;
+        if (!origVoiceSrc && (origVoiceVol || 0) > 0) {
+          const v = Math.min(1.0, (origVoiceVol || 0) / 100.0);
+          videoRef.current.volume = v;
+          videoRef.current.muted = false;
+        } else {
+          videoRef.current.volume = 0.0;
+          videoRef.current.muted = true;
+        }
       }
       if (bgmAudioRef.current) {
         bgmAudioRef.current.volume = Math.min(1.0, bgmVol / 100.0);
+        bgmAudioRef.current.muted = false;
+      }
+      if (origVoiceAudioRef.current) {
+        const v = Math.max(0.0, Math.min(1.0, (origVoiceVol || 0) / 100.0));
+        origVoiceAudioRef.current.volume = v;
+        origVoiceAudioRef.current.muted = v <= 0.001;
       }
     }
 
@@ -282,6 +316,7 @@ export const WYSIWYGPlayer: React.FC<WYSIWYGPlayerProps> = ({
       if (voiceAudioRef.current) voiceAudioRef.current.currentTime = 0;
       if (bgmAudioRef.current) bgmAudioRef.current.currentTime = 0;
       if (customBgmAudioRef.current) customBgmAudioRef.current.currentTime = 0;
+      if (origVoiceAudioRef.current) origVoiceAudioRef.current.currentTime = 0;
       onSeek(0);
     }
 
@@ -294,11 +329,13 @@ export const WYSIWYGPlayer: React.FC<WYSIWYGPlayerProps> = ({
         bgmAudioRef.current?.play().catch(() => {});
         customBgmAudioRef.current?.play().catch(() => {});
       }
+      origVoiceAudioRef.current?.play().catch(() => {});
     } else {
       v.pause();
       voiceAudioRef.current?.pause();
       bgmAudioRef.current?.pause();
       customBgmAudioRef.current?.pause();
+      origVoiceAudioRef.current?.pause();
     }
     onPlayPauseToggle();
   };
@@ -309,6 +346,7 @@ export const WYSIWYGPlayer: React.FC<WYSIWYGPlayerProps> = ({
     if (voiceAudioRef.current) voiceAudioRef.current.currentTime = safeT;
     if (bgmAudioRef.current) bgmAudioRef.current.currentTime = safeT;
     if (customBgmAudioRef.current) customBgmAudioRef.current.currentTime = safeT;
+    if (origVoiceAudioRef.current) origVoiceAudioRef.current.currentTime = safeT;
     syncAudioVolumes(safeT);
     onSeek(safeT);
   };
@@ -323,6 +361,7 @@ export const WYSIWYGPlayer: React.FC<WYSIWYGPlayerProps> = ({
           if (voiceAudioRef.current) voiceAudioRef.current.currentTime = 0;
           if (bgmAudioRef.current) bgmAudioRef.current.currentTime = 0;
           if (customBgmAudioRef.current) customBgmAudioRef.current.currentTime = 0;
+          if (origVoiceAudioRef.current) origVoiceAudioRef.current.currentTime = 0;
         }
         videoRef.current.play().catch((err) => {
           console.warn('[WYSIWYGPlayer] Programmatic video play error:', err);
@@ -333,30 +372,43 @@ export const WYSIWYGPlayer: React.FC<WYSIWYGPlayerProps> = ({
         if (bgmAudioRef.current && bgmAudioRef.current.paused) bgmAudioRef.current.play().catch(() => {});
         if (customBgmAudioRef.current && customBgmAudioRef.current.paused) customBgmAudioRef.current.play().catch(() => {});
       }
+      if (origVoiceAudioRef.current && origVoiceAudioRef.current.paused) origVoiceAudioRef.current.play().catch(() => {});
     } else {
       videoRef.current?.pause();
       voiceAudioRef.current?.pause();
       bgmAudioRef.current?.pause();
       customBgmAudioRef.current?.pause();
+      origVoiceAudioRef.current?.pause();
     }
-  }, [isPlaying, voiceSrc]);
+  }, [isPlaying, voiceSrc, origVoiceSrc]);
 
   // Sync seek scrubber time across video and all audio stems
   useEffect(() => {
-    if (videoRef.current && Math.abs(videoRef.current.currentTime - currentTime) > 0.15) {
+    // When paused: apply any seek change to videoRef immediately (threshold 0.05s)
+    // When playing: ONLY apply if there was a real explicit seek/jump (> 0.5s), NEVER from frame-by-frame render lag!
+    const isPaused = !isPlaying || (videoRef.current?.paused ?? true);
+    const threshold = isPaused ? 0.05 : 0.5;
+
+    if (videoRef.current && Math.abs(videoRef.current.currentTime - currentTime) > threshold) {
       videoRef.current.currentTime = currentTime;
+      if (isPlaying && videoRef.current.paused) {
+        videoRef.current.play().catch(() => {});
+      }
     }
-    if (voiceAudioRef.current && Math.abs(voiceAudioRef.current.currentTime - currentTime) > 0.15) {
+    if (voiceAudioRef.current && Math.abs(voiceAudioRef.current.currentTime - currentTime) > threshold) {
       voiceAudioRef.current.currentTime = currentTime;
     }
-    if (bgmAudioRef.current && Math.abs(bgmAudioRef.current.currentTime - currentTime) > 0.15) {
+    if (bgmAudioRef.current && Math.abs(bgmAudioRef.current.currentTime - currentTime) > threshold) {
       bgmAudioRef.current.currentTime = currentTime;
     }
-    if (customBgmAudioRef.current && Math.abs(customBgmAudioRef.current.currentTime - currentTime) > 0.15) {
+    if (customBgmAudioRef.current && Math.abs(customBgmAudioRef.current.currentTime - currentTime) > threshold) {
       customBgmAudioRef.current.currentTime = currentTime;
     }
+    if (origVoiceAudioRef.current && Math.abs(origVoiceAudioRef.current.currentTime - currentTime) > threshold) {
+      origVoiceAudioRef.current.currentTime = currentTime;
+    }
     syncAudioVolumes(currentTime);
-  }, [currentTime, voiceSrc, voiceVol, bgmVol, customBgmVol, origRanges, cues]);
+  }, [currentTime, isPlaying, voiceSrc, voiceVol, bgmVol, customBgmVol, origVoiceVol, origRanges, cues]);
 
   // High-precision smooth timeline tracking loop (~0.025s / 40fps instead of native 0.3s HTML5 timeupdate)
   useEffect(() => {
@@ -399,8 +451,51 @@ export const WYSIWYGPlayer: React.FC<WYSIWYGPlayerProps> = ({
       if (dur && onDurationChange) {
         onDurationChange(dur);
       }
+      if (videoRef.current.currentTime === 0) {
+        try {
+          videoRef.current.currentTime = 0.001;
+        } catch {
+          // ignore
+        }
+      }
     }
   };
+
+  // Proactive metadata & duration sync on videoSrc mount or change
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+
+    const syncMetadata = () => {
+      const vw = v.videoWidth || 1920;
+      const vh = v.videoHeight || 1080;
+      setVideoDim({ w: vw, h: vh });
+      if (v.duration && !isNaN(v.duration) && v.duration > 0) {
+        onDurationChange?.(v.duration);
+      }
+      if (v.currentTime === 0) {
+        try {
+          v.currentTime = 0.001;
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    if (v.readyState >= 1) {
+      syncMetadata();
+    } else {
+      const onLoaded = () => {
+        syncMetadata();
+        v.removeEventListener('loadedmetadata', onLoaded);
+      };
+      v.addEventListener('loadedmetadata', onLoaded);
+      v.load();
+      return () => {
+        v.removeEventListener('loadedmetadata', onLoaded);
+      };
+    }
+  }, [videoSrc]);
 
   const handleDurationChange = () => {
     if (videoRef.current) {
@@ -507,6 +602,9 @@ export const WYSIWYGPlayer: React.FC<WYSIWYGPlayerProps> = ({
     };
 
     updateGeometry();
+    const rafId = requestAnimationFrame(() => {
+      updateGeometry();
+    });
     let ro: ResizeObserver | null = null;
     if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
       ro = new ResizeObserver(() => {
@@ -516,6 +614,7 @@ export const WYSIWYGPlayer: React.FC<WYSIWYGPlayerProps> = ({
     }
     window.addEventListener('resize', updateGeometry);
     return () => {
+      cancelAnimationFrame(rafId);
       if (ro) ro.disconnect();
       window.removeEventListener('resize', updateGeometry);
     };
@@ -860,11 +959,11 @@ export const WYSIWYGPlayer: React.FC<WYSIWYGPlayerProps> = ({
         {/* Inner Video Container with distinct crisp border */}
         <div
           style={{
-            position: 'absolute',
-            left: `${innerRect.left}px`,
-            top: `${innerRect.top}px`,
-            width: `${innerRect.width}px`,
-            height: `${innerRect.height}px`,
+            position: innerRect.width > 0 ? 'absolute' : 'relative',
+            left: innerRect.width > 0 ? `${innerRect.left}px` : undefined,
+            top: innerRect.width > 0 ? `${innerRect.top}px` : undefined,
+            width: innerRect.width > 0 ? `${innerRect.width}px` : '100%',
+            height: innerRect.height > 0 ? `${innerRect.height}px` : '100%',
           }}
           className={`relative overflow-hidden bg-black flex items-center justify-center shadow-2xl ${
             aspectRatio && aspectRatio !== 'original' && aspectRatio !== 'gốc'
@@ -877,10 +976,16 @@ export const WYSIWYGPlayer: React.FC<WYSIWYGPlayerProps> = ({
               <video
                 ref={videoRef}
                 src={videoSrc}
+                preload="auto"
                 onClick={handleDirectPlayPause}
                 onTimeUpdate={handleTimeUpdate}
                 onLoadedMetadata={handleLoadedMetadata}
                 onDurationChange={handleDurationChange}
+                onError={() => {
+                  setTimeout(() => {
+                    if (videoRef.current) videoRef.current.load();
+                  }, 500);
+                }}
                 onEnded={() => {
                   if (videoRef.current) videoRef.current.currentTime = 0;
                   onSeek(0);
@@ -921,6 +1026,18 @@ export const WYSIWYGPlayer: React.FC<WYSIWYGPlayerProps> = ({
                   onError={() => {
                     setTimeout(() => {
                       if (customBgmAudioRef.current) customBgmAudioRef.current.load();
+                    }, 500);
+                  }}
+                />
+              )}
+              {origVoiceSrc && (
+                <audio
+                  ref={origVoiceAudioRef}
+                  src={origVoiceSrc}
+                  preload="auto"
+                  onError={() => {
+                    setTimeout(() => {
+                      if (origVoiceAudioRef.current) origVoiceAudioRef.current.load();
                     }, 500);
                   }}
                 />

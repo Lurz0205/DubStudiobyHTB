@@ -1,21 +1,21 @@
 # AGENTS.md — dubstudio
 
-Read this file at the start of EVERY session. Then read PROGRESS.md. Do not read ROADMAP.md unless requested. Read nothing else unless needed.
+Read this file at start of EVERY session. Then read PROGRESS.md. Do not read ROADMAP.md unless requested. Read nothing else unless needed.
 
 ## 1. Product
 
-Personal, local-first Windows desktop tool: Chinese video -> Vietnamese dubbed video (+ Vietnamese subtitles).
-Pipeline: local video import -> audio extraction -> vocal/BGM separation -> ASR (Chinese) -> context-aware translation (zh->vi) -> TTS (Vietnamese, local) -> audio-video fit -> mix -> render/export.
+Local-first Windows desktop tool: Chinese video -> Vietnamese dubbed video (+ subtitles).
+Pipeline: local video import -> audio extract -> vocal/BGM separation -> ASR (zh) -> context-aware translation (zh->vi) -> TTS (vi, local) -> fit -> mix -> render/export.
 
 - Input: 8-15 min videos and <1 min shorts. Not feature films (do not over-engineer).
-- Free and offline, except LLM translation (cheap Gemini / Groq API).
+- Free and offline, except LLM translation (Edge CDP Gemini Web / cheap Gemini Flash & Groq API).
 - Single non-expert user on a laptop. Simple, robust, debuggable solutions.
-- UX reference: "CofiDub" (Tabs: Lồng tiếng, Ghép video, Tài khoản dịch, Hướng dẫn). Only accepts local video files.
+- UX reference: "CofiDub" (Tabs: Dubbing, Merge video, Translation account, Guide). Only accepts local video files.
 - Clean-room implementation: never copy CofiDub code, assets, or voices.
 
 ## 2. Out of scope (do not implement)
 
-- Downloading videos from the Internet (yt-dlp, cookies) — local files only.
+- Downloading videos from Internet (yt-dlp, cookies) — local files only.
 - Copyright/duplicate bypass evasion features (random flip, clip trimming).
 - Licensing, payments, user accounts, telemetry.
 - Automating browser logins to Google/Gemini (API keys only).
@@ -39,12 +39,12 @@ Pipeline: local video import -> audio extraction -> vocal/BGM separation -> ASR 
 - R10. Safety: never run destructive commands outside files created this session. Never touch outside project root. Never log, commit, or echo API keys (.env is gitignored).
 - R11. After each working milestone: update PROGRESS.md (<= 30 lines: done / next / open issues).
 - R12. Strictly stick to assigned tasks. Do not expand scope.
-- R13. UI Icons: NEVER embed Unicode emojis in button labels, tabs, or text. Always use SVG vector icons via `ui/icons.py` (`btn.setIcon(get_icon(name, color))` or `set_button_icon(btn, name, text)`). Button labels must be plain text.
-- R14. Packaging & Releases: Quy trình đóng gói và phát hành:
-  (1) Kiểm thử & Ghi chú bắt buộc: Sau khi sửa code, chạy toàn bộ `pytest tests/ -q` (phải pass 100%). Cập nhật đầy đủ `RELEASE_NOTES.md`. Tuyệt đối KHÔNG dùng commit message vô nghĩa như "Update source tree snapshot"; luôn dùng message tường minh mô tả các tính năng cốt lõi (ví dụ: `Release v1.1.3: +20dB Voice Boost, WYSIWYG 9:16 Subtitles, and Unified Export`). Commit phát hành hiện tại phải luôn nằm đầu Mục 3 của `RELEASE_AUDIT.md`.
-  (2) Quy tắc mốc so sánh Release (`tag < CURRENT_VERSION`): Luôn lấy mốc đối chiếu audit và cắt gói cập nhật delta từ bản release chính thức trước đó trên GitHub. Ví dụ: Khi phát hành hoặc cập nhật ghi đè `v1.1.3`, mốc so sánh luôn là `v1.1.2`; khi phát hành `v1.1.4`, mốc so sánh tự động là `v1.1.3`. Khi ghi đè cùng phiên bản, phải tự động xóa sạch Release và Git Tag trùng trên GitHub trước khi audit để Velopack tải đúng bản trước đó và cắt delta chuẩn 100%.
-  (3) Đẩy mã nguồn & Đóng gói tự động trên mây: Luôn tuân thủ nguyên tắc ĐỒNG BỘ TỆP MỚI SO VỚI RELEASE TRƯỚC ĐÓ. Script `.venv\Scripts\python.exe scripts/push_code_to_github.py --tag vX.X.X` tự động đối chiếu cây mã nguồn với release liền trước trên GitHub: chỉ tải lên các blob thay đổi hoặc thêm mới (Modified/Added), tái sử dụng SHA của các file trùng khớp (Identical) để truyền dữ liệu nhẹ nhất, và xóa sạch các file đã bị xóa trên local khỏi git tree. Sau khi đẩy commit và tag, GitHub Actions (`.github/workflows/build_release.yml`) tự động build, package bằng Velopack (`vpk pack --noPortable`), và gắn release (`Setup.exe`, `full.nupkg`, `delta.nupkg`) trực tiếp trên mây. Tuyệt đối không upload file nặng từ máy local qua WiFi chập chờn.
-  (4) Packaged mode (`is_packaged() == True`): Phải độc lập, không tham chiếu dev `.venv`. Kiểm thử máy người dùng bằng `scripts/sim_user_machine.ps1`. Mọi subprocess chạy ngầm phải dùng `get_subprocess_env()` và `get_subprocess_kwargs()` (`CREATE_NO_WINDOW` / `SW_HIDE`).
+- R13. UI Icons: NEVER embed Unicode emojis in button labels, tabs, or UI text. Always use SVG vector icons. Button labels must be plain text.
+- R14. Packaging & Releases: Release and packaging workflow:
+  (1) Mandatory Tests & Notes: Run full `pytest tests/ -q` (100% pass required). Update `RELEASE_NOTES.md`. Never use vague commit messages like "Update source tree snapshot"; write explicit messages detailing core changes (e.g., `Release v2.0.1: Subtitle Burn Fix, Slider Sync`). Current release commit must head Section 3 of `RELEASE_AUDIT.md`.
+  (2) Release Comparison Baseline (`tag < CURRENT_VERSION`): Always use previous official GitHub release as audit baseline and delta package source (e.g., `v2.0.1` compares against `v2.0.0`). When overwriting identical version, purge conflicting remote release/tag on GitHub before audit so Velopack downloads true previous baseline for accurate delta diffs.
+  (3) Cloud CI/CD & Sync New Files Relative to Previous Release: Strictly adhere to SYNCHRONIZING ONLY NEW/MODIFIED FILES RELATIVE TO PREVIOUS RELEASE. Script `.venv\Scripts\python.exe scripts/push_code_to_github.py --tag vX.X.X` diffs local tree against previous GitHub release: uploads only modified/added blobs, reuses identical file SHAs for minimal transfer, and purges local-deleted files from git tree. GitHub Actions (`.github/workflows/build_release.yml`) builds, packages via Velopack (`vpk pack --noPortable`), and attaches release assets (`Setup.exe`, `full.nupkg`, `delta.nupkg`) in cloud. Never upload heavy binaries locally over WiFi.
+  (4) Packaged Mode (`is_packaged() == True`): Must run standalone without dev `.venv`. Test user machine simulation via `scripts/sim_user_machine.ps1`. All background subprocesses must use `get_subprocess_env()` and `get_subprocess_kwargs()` (`CREATE_NO_WINDOW` / `SW_HIDE`).
 
 ## 4. Environment (fixed facts)
 
@@ -63,38 +63,42 @@ Budget:
 Layout:
 ```
 dubstudio/
-  config.py, logging_setup.py, events.py, errors.py, jobstate.py, ffmpeg_utils.py, packaging.py
+  config.py, logging_setup.py, events.py, errors.py, jobstate.py, ffmpeg_utils.py, packaging.py, paths.py
   stages/        ingest, extract_audio, separate, asr, analyze, translate, tts, fit, mix, render
   tts/           base.py, vieneu.py, worker_server.py
-  llm/           base.py, gemini.py, groq.py, prompts/
+  llm/           base.py, cdp_gemini.py, fit_rewrite.py, gemini.py, groq.py, prompts/
   subtitles/     ass.py, cue_split.py, sentence_align.py
-ui/              app.py, main_window.py, icons.py, pages/, widgets/, dialogs/
+  text/          vi_normalize.py
+frontend/        React UI (dist/ embedded via pywebview, inline CSS bundle)
 config/          default.toml, components.json
 scripts/ tests/ models/ workspace/ samples/ out/ .venv/ .env
+start_app.py     Entry point: DesktopAPIBridge + FastAPI background server + PyWebView
 ```
 Rules: Stages are `run(job, cfg) -> None`. Type hints, pathlib, UTF-8 everywhere. Code/comments in English; user-facing strings/errors in Vietnamese.
 
 ## 6. Data contract
 
-- `workspace/<job_id>/`: `state.json`, `audio/`, `asr.json`, `analysis.json`, `segments.json`, `tts/`, `fit_plan.json`, `voice_track.wav`, `out/`.
-- Timing constraints: allowable overlap = 0.10s, speedup [1.0, 1.1x], neutral [0.95, 1.05]. Placement uses absolute source timestamps. Multi-pass rewrite loop for overlaps > 0.10s.
+- `workspace/<job_id>/`: `state.json`, `input.mp4`, `audio/orig.wav`, `audio/bgm.wav`, `audio/vocals.wav`, `asr.json`, `analysis.json`, `segments.json`, `tts/`, `fit_plan.json`, `voice_track.wav`, `voice_raw.wav`, `mixed.wav`, `out/`.
+- Timing constraints: `ALLOWABLE_OVERLAP = 0.25s`, `MAX_SILENCE_SHIFT = 0.25s`. Speedup range [1.0, 1.18x], neutral zone [0.95, 1.05]. Placement uses absolute source timestamps. Syllable-based fit rewrite (`tts_words`, `wps`, 1.04x compression).
 
 ## 7. Technology defaults
 
-1. ASR (zh): faster-whisper `large-v3-turbo`, int8_float16 with VAD.
+1. ASR (zh): FunASR `SenseVoice-Small` (merge_vad=False) as default; `faster-whisper large-v3-turbo` with VAD & `reconnect_dangling_asr_segments` fallback.
 2. Separation: Demucs `htdemucs` / BS-RoFormer EP 317 (overlap=2).
 3. TTS (vi): VieNeu-TTS-v3 Turbo, local ONNX/CUDA, warm persistent worker process.
-4. Translation: Groq (Qwen/Llama) + Gemini Flash fallback. Rate-limited, cached by prompt hash.
-5. Render: ffmpeg, `h264_nvenc` (fallback `libx264`). Subtitles as ASS via libass.
-6. GUI: PyQt6 desktop application with dark theme and vector SVG icons.
+4. Translation: Edge CDP Gemini Web automation (with refusal rescue & automatic tab closing) + Gemini Flash API / Groq fallback + manual prompt fallback.
+5. Render: ffmpeg, `h264_nvenc` (fallback `libx264`). Subtitles as ASS via libass using Windows Native GDI font metrics (100% PyQt6-free).
+6. GUI: PyWebView desktop application with React frontend, dark theme, inline CSS watchdog, and SVG vector icons.
 
 ## 8. Known Windows pitfalls
 
 - cuBLAS/cuDNN DLLs: load via `os.add_dll_directory` before importing ctranslate2/torch.
-- PyTorch must be the CUDA build. Verify with `torch.cuda.is_available()`.
+- PyTorch must be CUDA build. Verify with `torch.cuda.is_available()`.
 - Set `PYTHONUTF8=1`; open files with `encoding="utf-8"`. Relative paths for ffmpeg `subtitles=` filter.
-- Whisper silence hallucination: VAD + no_speech thresholds; drop duplicate phrases.
-- Multiprocessing on PyInstaller: always call `freeze_support()` at entry point before any logic.
+- Whisper/ASR splitting: use `reconnect_dangling_asr_segments` to prevent cutting sentences mid-thought on VAD pause or commas.
+- Edge CDP automation: port 9222, launch with `--disable-session-crashed-bubble`, close tabs via `/json/close/{id}` upon completion.
+- Subtitle font measurement: use `ctypes.windll.gdi32` (Windows Native GDI); do NOT add PyQt6/Qt dependencies.
+- Multiprocessing on PyInstaller: call `freeze_support()` at entry point before any logic.
 
 ## 9. Quality bar
 
@@ -104,5 +108,5 @@ Rules: Stages are `run(job, cfg) -> None`. Type hints, pathlib, UTF-8 everywhere
 
 ## 10. Communication
 
-- Talk to the owner in Vietnamese, plain and short. Code stays English.
+- Talk to owner in Vietnamese, plain and short. Code stays English.
 - Each reply: what changed (<= 5 lines); what owner must run/check; what is needed next.

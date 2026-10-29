@@ -163,6 +163,13 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
         except Exception:
             pass
 
+    # Lọc bỏ và giới hạn các vùng giữ âm gốc nằm gọn trong thời lượng video thực tế
+    valid_keep_ranges = []
+    for st, en in keep_orig_ranges:
+        if st < video_dur and en > st:
+            valid_keep_ranges.append((max(0.0, st), min(video_dur, en)))
+    keep_orig_ranges = valid_keep_ranges
+
     # Merge overlapping keep_orig ranges
     merged_keep_ranges = []
     if keep_orig_ranges:
@@ -323,10 +330,10 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
             orig_bgm_volume = max(0.0, min(2.0, raw_bgm))
 
             raw_orig_voice = float(mix_data.get("orig_voice_volume", 0.00))
-            if raw_orig_voice > 2.0:
+            if raw_orig_voice > 1.0:
                 raw_orig_voice /= 100.0
-            orig_voice_volume = max(0.0, min(2.0, raw_orig_voice))
-            include_orig_voice = bool(mix_data.get("include_orig_voice", False)) or (orig_voice_volume > 0.01)
+            orig_voice_volume = max(0.0, min(1.0, raw_orig_voice))
+            include_orig_voice = bool(mix_data.get("include_orig_voice", False)) or (orig_voice_volume > 0.005)
 
             raw_vi_voice = float(mix_data.get("vi_voice_volume", mix_data.get("voice_volume", 1.00)))
             if raw_vi_voice > 2.0:
@@ -410,11 +417,8 @@ def run(job: JobContext, cfg: AppConfig, force: bool = False) -> None:
         mix_inputs.append("[ducked_custom_bgm]")
         input_idx += 1
 
-    # Track 4: Original voice/vocals
-    if orig_voice_volume <= 1.0:
-        orig_voice_gain = max(0.0, orig_voice_volume)
-    else:
-        orig_voice_gain = 1.0 + 2.33 * (orig_voice_volume - 1.0)
+    # Track 4: Original voice/vocals (capped at 100% / 1.0 linear gain)
+    orig_voice_gain = max(0.0, min(1.0, orig_voice_volume))
 
     if include_orig_voice and orig_target and orig_target.exists() and orig_voice_gain > 0.001:
         inputs.extend(["-i", str(orig_target.resolve())])

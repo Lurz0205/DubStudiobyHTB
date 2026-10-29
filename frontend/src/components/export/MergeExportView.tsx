@@ -65,6 +65,7 @@ export const MergeExportView: React.FC<MergeExportViewProps> = ({
   const [customBgmPath, setCustomBgmPath] = useState('');
   const [customBgmVol, setCustomBgmVol] = useState(50);
   const [origVoiceVol, setOrigVoiceVol] = useState(0);
+  const [vocalsUrl, setVocalsUrl] = useState<string | undefined>(undefined);
 
   // Playback state
   const [currentTime, setCurrentTime] = useState(0);
@@ -86,10 +87,14 @@ export const MergeExportView: React.FC<MergeExportViewProps> = ({
     const raw = (currentCue.text || '').trim();
     if (!raw) return '';
 
-    // 1. Explicit sub-cues with timestamps
+    // 1. Explicit sub-cues with timestamps - only use if text matches currentCue.text!
     if (currentCue.cues && Array.isArray(currentCue.cues) && currentCue.cues.length > 0) {
-      const match = currentCue.cues.find((sc: any) => currentTime >= sc.start && currentTime <= sc.end);
-      if (match && match.text) return match.text.trim();
+      const joinedSubText = currentCue.cues.map((sc: any) => sc.text || '').join(' ').replace(/\s+/g, ' ').trim();
+      const normRaw = raw.replace(/\s+/g, ' ').trim();
+      if (joinedSubText === normRaw || joinedSubText.replace(/[.,!?;:…—\-]/g, '') === normRaw.replace(/[.,!?;:…—\-]/g, '')) {
+        const match = currentCue.cues.find((sc: any) => currentTime >= sc.start && currentTime <= sc.end);
+        if (match && match.text) return match.text.trim();
+      }
     }
 
     // 2. Sequential Sub-segment Timing based on _effective_weight matching cue_split.py 1:1
@@ -222,19 +227,33 @@ export const MergeExportView: React.FC<MergeExportViewProps> = ({
   useEffect(() => {
     if (!jobId) return;
     bridge.getProjectData(jobId).then((data) => {
-      if (data && data.style) {
-        if (Array.isArray(data.style.keep_original_ranges)) {
-          setOrigRanges(
-            data.style.keep_original_ranges.map((r: any) => ({
-              start: Number(r[0] || 0),
-              end: Number(r[1] || 0),
-            }))
-          );
+      if (data) {
+        if (data.vocals_url) {
+          setVocalsUrl(data.vocals_url);
         }
-        if (Array.isArray(data.style.color_boxes)) {
-          setColorBoxes(data.style.color_boxes);
-        } else if (data.style.color_box && typeof data.style.color_box === 'object') {
-          setColorBoxes([data.style.color_box]);
+        if (data.style) {
+          if (data.style.orig_voice_volume !== undefined) {
+            const rawOv = Number(data.style.orig_voice_volume);
+            setOrigVoiceVol(rawOv <= 1.0 ? Math.round(rawOv * 100) : Math.min(100, Math.round(rawOv)));
+          }
+          if (Array.isArray(data.style.keep_original_ranges)) {
+            setOrigRanges(
+              data.style.keep_original_ranges.map((r: any) => ({
+                start: Number(r[0] || 0),
+                end: Number(r[1] || 0),
+              }))
+            );
+          } else {
+            setOrigRanges([]);
+          }
+          if (Array.isArray(data.style.color_boxes)) {
+            setColorBoxes(data.style.color_boxes);
+          } else if (data.style.color_box && typeof data.style.color_box === 'object') {
+            setColorBoxes([data.style.color_box]);
+          }
+        }
+        if (typeof data.duration === 'number' && data.duration > 0) {
+          setDuration((prev) => (prev > 0 ? prev : data.duration));
         }
       }
     });
@@ -368,6 +387,8 @@ export const MergeExportView: React.FC<MergeExportViewProps> = ({
             bgmSrc={bgmSrc}
             voiceVol={voiceVol}
             bgmVol={bgmVol}
+            origVoiceSrc={vocalsUrl}
+            origVoiceVol={origVoiceVol}
             origRanges={origRanges}
             customBgmSrc={customBgmPath ? `/api/local-file?path=${encodeURIComponent(customBgmPath)}` : undefined}
             customBgmVol={customBgmVol}
@@ -600,9 +621,18 @@ export const MergeExportView: React.FC<MergeExportViewProps> = ({
               <input
                 type="range"
                 min="0"
-                max="200"
+                max="100"
                 value={origVoiceVol}
-                onChange={(e) => setOrigVoiceVol(Number(e.target.value))}
+                onChange={(e) => {
+                  const val = Math.max(0, Math.min(100, Number(e.target.value)));
+                  setOrigVoiceVol(val);
+                  if (jobId) {
+                    bridge.saveProjectStyle(jobId, {
+                      orig_voice_volume: val / 100.0,
+                      include_orig_voice: val > 0,
+                    });
+                  }
+                }}
                 className="w-full accent-white cursor-pointer"
               />
             </div>

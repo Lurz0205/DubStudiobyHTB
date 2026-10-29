@@ -124,6 +124,18 @@ def build_prompt(
 1. ƯU TIÊN SỐ 1 - TỰ NHIÊN, DỄ HIỂU, ĐỜI THƯỜNG: Dịch thành câu thoại tự nhiên, mượt mà như người Việt trò chuyện hàng ngày. Tuyệt đối tránh văn dịch thô cứng, gượng gạo, tối nghĩa hoặc nặng mùi Hán-Việt. Người xem nghe là hiểu ngay ý chính và cảm xúc của nhân vật.
 2. XỬ LÝ LỜI THOẠI NÓI NHANH, DÀY CHỮ: Với các đoạn tiếng Trung nói nhanh, dày đặc từ ngữ: HÃY DỊCH THOÁT Ý, GÃY GỌN, CÔ ĐỌNG. Lược bỏ các chi tiết vụn vặt hoặc từ ngữ rườm rà, tập trung truyền tải đúng nội dung cốt lõi và sắc thái nhân vật; tuyệt đối không nhồi nhét từng chữ Hán khiến câu dịch bị trúc trắc, khó hiểu.
 3. NHỊP ĐIỆU LỒNG TIẾNG VỪA VẶN: Câu dịch có độ dài vừa vặn với nhịp hình và thời lượng `dur_sec`, không mở đầu hoặc kết thúc bằng dấu '...', không để lửng câu, không dông dài thừa thãi khiến giọng đọc bị dồn ép.
+4. TỰ NHẬN DIỆN VÀ BẢO ĐẢM TÍNH TOÀN VẸN NGỮ NGHĨA CHO TỪNG ĐƠN VỊ [id] (TỐI QUAN TRỌNG):
+- MỖI ĐƠN VỊ [id] BẮT BUỘC PHẢI LÀ MỘT CÂU/Ý HOÀN CHỈNH, ĐỘC LẬP VỀ NGỮ PHÁP: Có đầy đủ kết cấu ngữ nghĩa (Chủ ngữ - Vị ngữ hoặc vế câu trọn ý), khi đứng độc lập một mình người xem nghe vẫn hiểu trọn vẹn thông tin.
+- TUYỆT ĐỐI KHÔNG NGẮT CÂU LỬNG LƠ Ở BẤT KỲ ĐÂU:
+  + Nghiêm cấm câu kết thúc lửng lơ ở danh từ, chủ ngữ, động từ chưa xong hành động, liên từ hoặc giới từ (ví dụ nghiêm cấm kết thúc bằng: "...chính là nhờ lớp dán nhám trên bề mặt", "...giúp tôi", "...tương đương", "...để", "...với", "...cùng").
+  + Câu tiếp theo TUYỆT ĐỐI KHÔNG ĐƯỢC bắt đầu bằng một vị ngữ cụt lủn hoặc phần bổ ngữ rơi rớt từ câu trước (ví dụ câu trước kết thúc bằng "...trên bề mặt", câu sau lại là "đã giúp làm mờ bớt..." -> ĐÂY LÀ LỖI CỰC KỲ NẶNG; hoặc câu trước "...đạt công suất 163 kW", câu sau là "tương đương với...").
+- CƠ CHẾ TỰ ĐỘNG BÙ HOÀN CÂU THEO NGỮ CẢNH:
+  + Nếu câu gốc tiếng Trung bị ngắt vụn do người nói ngập ngừng hoặc do nhận dạng giọng nói (ASR) cắt nhịp: BẠN PHẢI TỰ ĐỘNG KẾT NỐI Ý VỚI CÂU TRƯỚC VÀ SAU ĐỂ TỪNG CÂU DỊCH ĐỀU LÀ MỘT CÂU TỰ NHIÊN, TRỌN VẸN.
+  + Nếu một vế ý rơi sang câu sau: BẮT BUỘC PHẢI BỔ SUNG CHỦ NGỮ/TỪ NỐI TỰ NHIÊN để câu sau trở thành một câu hoàn chỉnh độc lập:
+    * Ví dụ: Thay vì để câu sau là "Đã giúp làm mờ bớt nếp gấp ở giữa đi...", BẮT BUỘC phải dịch thành: "Lớp dán này giúp làm mờ bớt nếp gấp ở giữa đi..."
+    * Ví dụ: Thay vì để câu sau là "Đạt mức kinh hoàng 2000 Ampe.", BẮT BUỘC phải dịch thành: "Dòng điện đạt mức kinh hoàng tới 2000 Ampe."
+    * Ví dụ: Thay vì để câu sau là "Tương đương với 26 chiếc máy giặt.", BẮT BUỘC phải dịch thành: "Con số này tương đương với công suất của 26 chiếc máy giặt."
+- TUYỆT ĐỐI KHÔNG mở đầu hoặc kết thúc bằng dấu "...", dấu phẩy ",", hoặc để lửng câu.
 
 ĐỊNH DẠNG ĐẦU RA:
 Chỉ trả về DUY NHẤT một JSON object có dạng:

@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   IconFolder, IconMic, IconFilm, 
   IconRefresh, IconInfo, IconSettings,
   IconScissors 
 } from './icons/StudioIcons';
+import { bridge } from '../api/bridge';
 
 export type NavTab = 'projects' | 'studio' | 'editor' | 'tools' | 'updates' | 'tutorial' | 'settings';
 
@@ -13,6 +14,16 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
+  const [appVersion, setAppVersion] = useState<string>('v2.0.2');
+
+  useEffect(() => {
+    bridge.getAppVersion().then((v) => {
+      if (v) {
+        setAppVersion(v.startsWith('v') ? v : `v${v}`);
+      }
+    }).catch(() => {});
+  }, []);
+
   const topNavItems = [
     { id: 'projects' as NavTab, label: 'Dự án', icon: IconFolder },
     { id: 'studio' as NavTab, label: 'Lồng tiếng', icon: IconMic },
@@ -83,7 +94,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
 
         {/* Subtle version indicator */}
         <div className="px-3 pt-2 text-[10px] text-zinc-600 font-normal">
-          DubStudio v2.0.0 Stable
+          DubStudio {appVersion} Stable
         </div>
       </div>
     </aside>

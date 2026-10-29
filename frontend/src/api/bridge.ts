@@ -406,18 +406,27 @@ export const bridge = {
     return { status: 'success', message: 'API key format valid' };
   },
 
+  getAppVersion: async (): Promise<string> => {
+    if (isNativeDesktop() && (window as any).pywebview?.api?.get_app_version) {
+      try {
+        return await (window as any).pywebview.api.get_app_version();
+      } catch {}
+    }
+    return '2.0.2';
+  },
+
   checkForUpdates: async () => {
     if (isNativeDesktop()) {
       return await (window as any).pywebview.api.check_for_updates();
     }
-    return { has_update: false, current_version: 'v2.0.0' };
+    return { has_update: false, current_version: 'v2.0.2' };
   },
 
   checkAppUpdate: async () => {
     if (isNativeDesktop()) {
       return await (window as any).pywebview.api.check_for_updates();
     }
-    return { has_update: false, current_version: 'v2.0.0' };
+    return { has_update: false, current_version: 'v2.0.2' };
   },
 
   getComponentsStatus: async () => {

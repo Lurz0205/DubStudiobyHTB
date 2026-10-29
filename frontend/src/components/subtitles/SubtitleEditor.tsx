@@ -424,6 +424,7 @@ export const SubtitleEditor: React.FC<SubtitleEditorProps> = ({
                   <textarea
                     rows={2}
                     value={cue.text}
+                    onFocus={() => onSelectCue(cue.id)}
                     onDoubleClick={(e) => e.stopPropagation()}
                     spellCheck={false}
                     autoCorrect="off"

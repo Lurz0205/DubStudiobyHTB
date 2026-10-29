@@ -61,3 +61,18 @@ def test_vi_normalize_comprehensive_cases():
     for text, expected in cases:
         norm = normalize_text(text)
         assert expected in norm, f"Failed for '{text}': got '{norm}'"
+
+
+def test_vi_normalize_degree_and_range():
+    # Crucial test: '20 độ đến 30 độ' must NOT turn into 'đồngộ' or 'đồng ngộ'
+    norm = normalize_text("20 độ đến 30 độ")
+    assert "hai mươi độ đến ba mươi độ" in norm
+    assert "đồng" not in norm
+    assert "ngộ" not in norm
+
+    # Degree / temperature symbol tests
+    norm_range = normalize_text("20-30°C")
+    assert "hai mươi đến ba mươi độ C" in norm_range
+
+    norm_temp = normalize_text("Nhiệt độ 35°C")
+    assert "ba mươi lăm độ C" in norm_temp

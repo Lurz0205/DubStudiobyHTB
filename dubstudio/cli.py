@@ -302,6 +302,11 @@ def run(
             voice_assign.run(job, cfg)
 
             if subtitles_only:
+                try:
+                    from dubstudio.llm.cdp_gemini import close_gemini_tabs
+                    close_gemini_tabs(getattr(cfg.translation, "cdp_port", 9222))
+                except Exception:
+                    pass
                 console.print(f"\n[bold green]🎉 Tạo và dịch phụ đề hoàn tất! Bạn có thể kiểm tra, tìm kiếm/thay thế trên bảng trước khi bấm tạo giọng lồng tiếng.[/bold green]")
                 return
         # In dub-only mode, we directly preserve the exact segment voices edited by the user on the table.
@@ -322,6 +327,12 @@ def run(
 
         # 11. Mix
         mix.run(job, cfg)
+
+        try:
+            from dubstudio.llm.cdp_gemini import close_gemini_tabs
+            close_gemini_tabs(getattr(cfg.translation, "cdp_port", 9222))
+        except Exception:
+            pass
 
         # 12. Render (chỉ chạy nếu không có cờ --no-render)
         if not no_render:

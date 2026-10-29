@@ -1070,3 +1070,10 @@ def run(job: JobContext, cfg: AppConfig) -> None:
 
     job.finish_stage(stage_name, outputs)
     emit_event(stage_name, 100.0, "Hoàn tất khớp âm thanh! 100% các đoạn thoại không bị đè lên nhau trên timeline.")
+
+    # Cleanly close Gemini tab via CDP after fit completes
+    try:
+        from dubstudio.llm.cdp_gemini import close_gemini_tabs
+        close_gemini_tabs(getattr(cfg.translation, "cdp_port", 9222))
+    except Exception:
+        pass

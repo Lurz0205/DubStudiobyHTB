@@ -20,6 +20,7 @@ interface StudioWorkspaceProps {
   videoSrc?: string;
   voiceSrc?: string;
   bgmSrc?: string;
+  origVoiceSrc?: string;
   cues: CueItem[];
   onCuesChange: (cues: CueItem[]) => void;
   subtitleStyle?: SubtitleStyle;
@@ -43,6 +44,7 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
   videoSrc,
   voiceSrc,
   bgmSrc,
+  origVoiceSrc,
   cues,
   onCuesChange,
   subtitleStyle: externalSubtitleStyle,
@@ -171,6 +173,9 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
               }));
               onCuesChange(formatted);
             }
+            if (data && typeof data.duration === 'number' && data.duration > 0) {
+              setDuration((prev) => (prev > 0 ? prev : data.duration));
+            }
           });
         }
       }
@@ -222,6 +227,8 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
             end: Number(r[1] || 0),
           }));
           setOrigRanges(loadedRanges);
+        } else {
+          setOrigRanges([]);
         }
       }
 
@@ -236,6 +243,10 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
           orig: s.orig || s.zh || s.zh_text || '',
         }));
         onCuesChange(formatted);
+      }
+
+      if (data && typeof data.duration === 'number' && data.duration > 0) {
+        setDuration((prev) => (prev > 0 ? prev : data.duration));
       }
     });
   }, [jobId, isActiveTab]);
@@ -273,23 +284,26 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
   }, [currentTime, cues, activeCueId]);
 
   // Determine current playback cue strictly by timestamp
-  const currentPlaybackCue = cues.find((c) => currentTime >= c.start && currentTime <= c.end);
-  const activeCue = isPlaying ? currentPlaybackCue : (currentPlaybackCue || cues.find((c) => c.id === activeCueId));
+  const activeCue = cues.find((c) => currentTime >= c.start && currentTime <= c.end);
 
   const activeSubtitle = (() => {
     if (!activeCue) return '';
     if (activeCue.mute_sub || (activeCue as any).muted_sub) return '';
-    // Only display subtitle if currentTime is within [activeCue.start, activeCue.end]
+    // Chỉ hiển thị phụ đề nếu currentTime thực sự nằm trong phạm vi thời lượng của câu (cả khi phát lẫn khi tạm dừng)
     if (currentTime < activeCue.start || currentTime > activeCue.end) {
       return '';
     }
     const raw = (activeCue.text || '').trim();
     if (!raw) return '';
 
-    // 1. Explicit sub-cues with timestamps
+    // 1. Explicit sub-cues with timestamps - only use if text matches activeCue.text!
     if (activeCue.cues && Array.isArray(activeCue.cues) && activeCue.cues.length > 0) {
-      const match = activeCue.cues.find((sc: any) => currentTime >= sc.start && currentTime <= sc.end);
-      if (match && match.text) return match.text.trim();
+      const joinedSubText = activeCue.cues.map((sc: any) => sc.text || '').join(' ').replace(/\s+/g, ' ').trim();
+      const normRaw = raw.replace(/\s+/g, ' ').trim();
+      if (joinedSubText === normRaw || joinedSubText.replace(/[.,!?;:…—\-]/g, '') === normRaw.replace(/[.,!?;:…—\-]/g, '')) {
+        const match = activeCue.cues.find((sc: any) => currentTime >= sc.start && currentTime <= sc.end);
+        if (match && match.text) return match.text.trim();
+      }
     }
 
     // 2. Sequential Sub-segment Timing based on _effective_weight matching cue_split.py 1:1
@@ -369,10 +383,48 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
         const textChanged = updates.text !== undefined && updates.text !== c.text;
         const voiceChanged = updates.voice !== undefined && updates.voice !== c.voice;
         const speedChanged = updates.speed !== undefined && updates.speed !== c.speed;
+        const startChanged = updates.start !== undefined && Math.abs(updates.start - c.start) > 0.01;
+        const endChanged = updates.end !== undefined && Math.abs(updates.end - c.end) > 0.01;
+        const timeChanged = startChanged || endChanged;
+
+        const newStart = updates.start !== undefined ? Number(updates.start) : Number(c.start);
+        const newEnd = updates.end !== undefined ? Number(updates.end) : Number(c.end);
+        const oldStart = Number(c.start);
+        const oldEnd = Number(c.end);
+        const oldDur = Math.max(0.05, oldEnd - oldStart);
+        const newDur = Math.max(0.05, newEnd - newStart);
+
+        if (timeChanged) {
+          // Proportionally scale sub-cues / sub-slices so timeline and preview display correctly immediately
+          if (item.cues && Array.isArray(item.cues) && item.cues.length > 0) {
+            item.cues = item.cues.map((sc: any) => {
+              const relSt = Math.max(0, Math.min(1, ((sc.start ?? oldStart) - oldStart) / oldDur));
+              const relEn = Math.max(0, Math.min(1, ((sc.end ?? oldEnd) - oldStart) / oldDur));
+              return {
+                ...sc,
+                start: Math.round((newStart + relSt * newDur) * 1000) / 1000,
+                end: Math.round((newStart + relEn * newDur) * 1000) / 1000,
+              };
+            });
+          }
+          if ((item as any).sub_slices && Array.isArray((item as any).sub_slices) && (item as any).sub_slices.length > 0) {
+            (item as any).sub_slices = (item as any).sub_slices.map((sc: any) => {
+              const relSt = Math.max(0, Math.min(1, ((sc.start ?? oldStart) - oldStart) / oldDur));
+              const relEn = Math.max(0, Math.min(1, ((sc.end ?? oldEnd) - oldStart) / oldDur));
+              return {
+                ...sc,
+                start: Math.round((newStart + relSt * newDur) * 1000) / 1000,
+                end: Math.round((newStart + relEn * newDur) * 1000) / 1000,
+              };
+            });
+          }
+        }
 
         if (textChanged) {
           (item as any).vi_text = updates.text;
           (item as any).tts_text = updates.text;
+          (item as any).cues = undefined; // Invalidate outdated sub-slices so preview immediately uses new text!
+          (item as any).sub_slices = undefined;
         }
         if (voiceChanged) {
           (item as any).user_edited_voice = Boolean(updates.voice);
@@ -400,6 +452,8 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
           ...c,
           vi_text: c.text,
           tts_text: c.text,
+          cues: undefined,
+          sub_slices: undefined,
           tts_hash: undefined,
           has_tts: false,
         };
@@ -811,6 +865,7 @@ export const StudioWorkspace: React.FC<StudioWorkspaceProps> = ({
             onAspectRatioChange={onAspectRatioChange}
             voiceSrc={voiceSrc}
             bgmSrc={bgmSrc}
+            origVoiceSrc={origVoiceSrc}
             voiceVol={voiceVol}
             bgmVol={bgmVol}
             origRanges={origRanges}

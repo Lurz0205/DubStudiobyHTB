@@ -1,6 +1,7 @@
 """Stage: asr. Transcribes Chinese audio using faster-whisper large-v3-turbo."""
 import json
 import os
+import re
 from pathlib import Path
 import site
 import sys
@@ -8,6 +9,88 @@ from dubstudio.config import AppConfig
 from dubstudio.errors import DubError
 from dubstudio.events import emit_event
 from dubstudio.jobstate import JobContext, compute_file_hash
+
+
+def reconnect_dangling_asr_segments(segments: list[dict], max_combined_dur: float = 9.5) -> list[dict]:
+    """
+    Merges adjacent ASR segments that were unnaturally split mid-sentence by VAD or ASR punctuation.
+    Fixes mid-sentence breaks like '当然现在它' + '也在经历' -> '当然现在它也在经历'.
+    """
+    if not segments or len(segments) <= 1:
+        return segments
+
+    terminal_punct = set("。！？!?…\n")
+    continuation_starters = (
+        "也", "在", "了", "着", "过", "的", "地", "得",
+        "而", "且", "并且", "但是", "所以", "因为", "而且", "然而", "不过",
+        "把", "被", "让", "叫", "给", "跟", "和", "与", "同",
+        "会", "能", "可以", "要", "想", "是", "就", "才", "又", "还", "都",
+        "个", "次", "只", "条", "件", "倍", "万", "千", "百", "点", "秒", "分",
+        "它", "他们", "它们", "这个", "那个", "这些", "那些",
+    )
+    dangling_enders = (
+        "现在", "目前", "我们", "他们", "大家", "直接", "因为", "所以",
+        "如果", "但是", "而且", "比较", "非常", "特别", "这个", "那个",
+        "一种", "一些", "大", "会", "能", "想", "要", "在", "跟", "和",
+    )
+
+    merged: list[dict] = []
+    curr = dict(segments[0])
+
+    for nxt in segments[1:]:
+        c_st = float(curr["start"])
+        c_en = float(curr["end"])
+        n_st = float(nxt["start"])
+        n_en = float(nxt["end"])
+        gap = round(n_st - c_en, 3)
+        combined_dur = round(n_en - c_st, 3)
+
+        c_txt = str(curr.get("src_text") or "").strip()
+        n_txt = str(nxt.get("src_text") or "").strip()
+
+        c_clean = re.sub(r'[，。！？、；…!?,;.\s]', '', c_txt)
+        n_clean = re.sub(r'[，。！？、；…!?,;.\s]', '', n_txt)
+
+        c_last_char = c_txt[-1] if c_txt else ""
+        c_has_terminal = c_last_char in terminal_punct
+
+        is_short_fragment = (c_en - c_st < 2.2 or len(c_clean) <= 6) and not c_has_terminal
+        next_is_continuation = any(n_clean.startswith(w) for w in continuation_starters)
+        curr_is_dangling = (
+            any(c_clean.endswith(w) for w in dangling_enders)
+            or (c_last_char in "，,、;；…—-" or not c_has_terminal)
+        )
+        next_is_tiny = (n_en - n_st < 1.5 or len(n_clean) <= 4)
+
+        should_merge = (
+            gap <= 1.1
+            and combined_dur <= max_combined_dur
+            and (
+                (is_short_fragment and (next_is_continuation or gap <= 0.45 or curr_is_dangling))
+                or (next_is_continuation and gap <= 0.6)
+                or (curr_is_dangling and next_is_continuation)
+                or (next_is_tiny and gap <= 0.45)
+            )
+        )
+
+        if should_merge:
+            c_txt_clean = c_txt.rstrip("，,、;；。…")
+            joined_txt = f"{c_txt_clean}{n_txt}"
+            curr["end"] = n_en
+            curr["src_text"] = joined_txt
+            curr["speech_time"] = round(curr.get("speech_time", 0.0) + nxt.get("speech_time", 0.0), 3)
+            if "words" in curr and "words" in nxt:
+                curr["words"] = curr["words"] + nxt["words"]
+        else:
+            merged.append(curr)
+            curr = dict(nxt)
+
+    merged.append(curr)
+
+    for idx, item in enumerate(merged, start=1):
+        item["id"] = idx
+
+    return merged
 
 
 def _setup_cuda_dlls():
@@ -287,12 +370,14 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
                     })
 
             # Split words into refined segments:
-            # 1. Gap between words >= split_silence_gap_s (0.35s)
-            # 2. Punctuation (，, 。, ！, ？, 、, ；)
-            # 3. Maximum segment length <= max_segment_duration_s (8.0s)
-            split_gap = cfg.asr.split_silence_gap_s
+            # 1. Terminal punctuation (。, ！, ？, !, ?) splits if curr_dur >= 1.2s
+            # 2. Clause punctuation (，, 、, ；) only splits if curr_dur >= 3.5s and gap >= 0.25s
+            # 3. Silence gap >= split_silence_gap_s (0.55s) and curr_dur >= 2.5s
+            # 4. Maximum segment length <= max_segment_duration_s (8.0s)
+            split_gap = max(0.5, cfg.asr.split_silence_gap_s)
             max_dur = cfg.asr.max_segment_duration_s
-            punct_set = set("，。！？、；…!?,;.")
+            terminal_punct = set("。！？!?…\n")
+            clause_punct = set("，、；,;")
 
             refined_segments = []
             current_words = []
@@ -330,11 +415,13 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
                 prev_w = current_words[-1]
                 gap = w["start"] - prev_w["end"]
                 curr_dur = w["end"] - current_words[0]["start"]
-                prev_has_punct = any(ch in punct_set for ch in prev_w["word"])
+                prev_has_terminal = any(ch in terminal_punct for ch in prev_w["word"])
+                prev_has_clause = any(ch in clause_punct for ch in prev_w["word"])
 
                 should_split = (
-                    prev_has_punct
-                    or gap >= split_gap
+                    (prev_has_terminal and curr_dur >= 1.2)
+                    or (prev_has_clause and curr_dur >= 3.5 and gap >= 0.25)
+                    or (gap >= split_gap and curr_dur >= 2.5)
                     or (curr_dur >= max_dur and gap >= 0.15)
                     or curr_dur >= (max_dur * 1.3)
                 )
@@ -349,6 +436,9 @@ def run(job: JobContext, cfg: AppConfig, input_audio: Path) -> None:
                 flush_segment(current_words)
 
             total_duration = round(info.duration, 2)
+
+        # Merge any dangling fragments or mid-sentence breaks produced by VAD/ASR
+        refined_segments = reconnect_dangling_asr_segments(refined_segments)
 
         # Save asr.json with full word details
         from dubstudio.jobstate import atomic_write_json

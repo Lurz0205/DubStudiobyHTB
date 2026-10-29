@@ -1,64 +1,19 @@
 # PROGRESS.md — DubStudio Progress
 
 ## Đã hoàn thành (Done)
-- **Phát hành DubStudio v2.0.1 — Vá lỗi Phụ đề xuất, Hòa âm BGM & Trạng thái dự án:**
-  - **Sửa lỗi phụ đề xuất mang nội dung cũ:** `dubstudio/subtitles/ass.py` bổ sung hàm `_norm_cmp` loại bỏ việc nạp các lát cắt cũ (`sub_slices`) khi không khớp với câu thoại mới sau `fit_rewrite` hoặc chỉnh sửa; `start_app.py` tự động phân tách lại `cues` và `sub_slices` khi sửa câu hoặc tạo lại TTS đơn lẻ.
-  - **Sửa lỗi chỉnh âm BGM không tác dụng & nâng mặc định lên 100%:** `start_app.py` ưu tiên nạp `voice_raw.wav` cho `voice_url` tránh nướng chết BGM vào rãnh giọng; `WYSIWYGPlayer.tsx` dùng `syncAudioVolumesRef` triệt tiêu lỗi stale closure khi kéo thanh trượt lúc đang phát; nâng mặc định BGM lên 100% trong `App.tsx` và `mix.py`; đồng bộ đầy đủ các kênh âm lượng (0–200%) vào `mix_settings.json` khi xuất.
-  - **Sửa lỗi dự án mới tạo tick hoàn thành phụ đề:** `start_app.py` cập nhật `get_projects()` chỉ gán `has_subtitles = True` khi `segments.json` thực sự chứa dữ liệu (`len(segments) > 0`).
-  - **Đóng gói & Kiểm thử:** Chạy `pytest tests/ -q` đạt 179 passed, 10 skipped (100% PASS); biên dịch gói ứng dụng sạch `dist\DubStudio\DubStudio.exe` với ExitCode 0 (--selftest OK).
-- **Sửa triệt để lỗi Preview ở trang chỉnh sửa & trang xuất bị lỗi (500 Error do xung đột ghi đọc file):**
-  - `dubstudio/api/app.py`: `_quick_rebuild_voice_track` sử dụng cơ chế ghi nguyên tử (atomic write qua file tạm `.tmp` và `os.replace`), chấm dứt triệt để lỗi Starlette `500 Internal Server Error: Too little data for declared Content-Length` khi trình phát preview đang đọc tệp đồng thời. Bổ sung cơ chế tự phục hồi `onError` trên các thẻ `<audio>` trong `WYSIWYGPlayer.tsx`.
-- **Sửa lỗi tính năng Tắt TTS câu thoại (`mute_tts`):**
-  - `frontend/src/components/video/WYSIWYGPlayer.tsx`: Truyền danh sách `cues` vào player; `syncAudioVolumes` tự động phát hiện mốc thời gian của câu bị tắt TTS để ngắt âm lượng giọng đọc (`volume = 0`, `muted = true`) ngay lập tức trong preview, đồng thời tự động mở tiếng video gốc tại đoạn đó.
-  - `dubstudio/api/app.py`: `_quick_rebuild_voice_track` lọc bỏ triệt để các đoạn có `mute_tts = True` khỏi `voice_track.wav` kể cả khi có `fit_plan.json`.
-- **Sửa triệt để lỗi xuất video chỉ có tiếng TTS mà không có nhạc nền (BGM):**
-  - `dubstudio/stages/mix.py`: Khắc phục xung đột tên tệp bằng cách tạo đồng thời `mixed.wav` (chứa toàn bộ các luồng âm thanh đã hòa âm theo slider) và `voice_track.wav`; cân chỉnh bộ lọc ducking sidechain nhẹ nhàng (`threshold=0.15`, `ratio=2.0`) thay vì nén triệt tiêu toàn bộ BGM như trước.
-  - `dubstudio/stages/render.py`: Ưu tiên sử dụng tệp `mixed.wav` khi xuất video hoàn chỉnh, bảo đảm 100% video xuất ra có đầy đủ cả giọng đọc TTS tiếng Việt lẫn nhạc nền BGM chuẩn âm lượng.
-- **Biên kịch lồng tiếng thoát ý & cân bằng thời lượng (fit_rewrite):**
-  - Loại bỏ hoàn toàn ký tự xuống dòng `\n` trong prompt `fit_rewrite.md`, làm sạch toàn bộ dữ liệu văn bản thành dòng đơn duy nhất trước khi gửi LLM và tự động phân tách lại thành các dòng phụ đề sau khi nhận kết quả.
-- **Triệt tiêu 100% lỗi mất CSS ngẫu nhiên khi khởi động (3 Lớp khóa Zero-Failure):**
-  - **Khóa 1 (Inline CSS)**: `frontend/vite.config.ts` tự động nhúng toàn bộ file CSS Tailwind (~63 KB) trực tiếp vào `<style id="dubstudio-core-css">` trong `<head>` của `frontend/dist/index.html`. Không còn bất kỳ round-trip HTTP nào cho file `.css`.
-  - **Khóa 2 (Active Server Readiness Probe)**: `start_app_v2.py` triển khai `wait_for_server_ready(base_url, timeout=15.0)` chủ động thăm dò endpoint root `/` cho đến khi server phản hồi HTTP 200, nội dung `> 1000` bytes và chứa `<style id="dubstudio-core-css">` mới mở cửa sổ PyWebView. `dubstudio/api/app.py` thiết lập header `Cache-Control: no-cache, no-store, must-revalidate`.
-  - **Khóa 3 (Self-Healing CSS Watchdog)**: `frontend/src/main.tsx` tự động kiểm tra computed style của `document.body` và sự hiện diện của inline style; tự động tiêm bù CSS dự phòng nếu phát hiện màu nền chưa đúng chuẩn dark mode `#121214`.
-- **Sửa triệt để lỗi Preview tab Phụ đề (Studio) không phát được:**
-  - `WYSIWYGPlayer.tsx`: Bổ sung `handleDirectPlayPause` và `handleDirectSeek` phát lệnh trực tiếp trên thẻ `<video>` và `<audio>` ngay trong user click gesture, giải quyết triệt để lỗi Autoplay policy của Chromium/WebView2 khi video chưa bị mute (video gốc chưa lồng tiếng); tự động tua về 0 khi bấm Play ở cuối video; hạ ngưỡng đồng bộ seek từ `0.35s` xuống `0.15s`.
-  - `StudioWorkspace.tsx`: Xóa sạch `cueStopTimerRef` và `playingCueId` khi bấm Play/Pause tránh bị timer nghe thử câu ngắt ngang; bổ sung phím tắt `Spacebar` phát/dừng toàn cục; truyền đầy đủ `voiceVol` và `bgmVol` vào `WYSIWYGPlayer`.
-- **Tối ưu hóa TTS Rewrite & Ngưỡng đè âm thanh (0.25s):**
-  - `dubstudio/stages/fit.py` & `dubstudio/api/app.py`: Đặt chuẩn `ALLOWABLE_OVERLAP = 0.25s` và `MAX_SILENCE_SHIFT = 0.25s` đồng bộ toàn hệ thống.
-  - Khắc phục triệt để lỗi rút gọn quá ngắn gây trống video: Tối ưu công thức tính ký tự ngân (`effective_dur_budget = new_avail + 0.25 - 0.02`), tăng tỷ lệ mục tiêu `[ideal_ratio=0.98, min_ratio=0.92, max_ratio=1.02]` giúp câu dịch giữ trọn vẹn độ dài tự nhiên, không bị hở khoảng lặng.
-- **Sửa triệt để lỗi câu cuối bị tràn thời lượng video:**
-  - Khóa cứng cận trên câu cuối theo `video_dur`, áp dụng cơ chế dịch ngược vào khoảng trống (`gap_before`) và co giãn tốc độ (1.0x-1.18x) tự nhiên trước khi hết video; kẹp chặt `cues` và audio buffer không vượt quá thời lượng video, chấm dứt hoàn toàn hiện tượng câu cuối nhảy timeline và bị ngắt tiếng giữa chừng khi kết thúc video.
-- **Nâng cấp toàn diện thuật toán Fit Rewrite (Đếm âm tiết tiếng Việt `tts_words` & Vi phẫu):**
-  - `dubstudio/stages/fit.py`: Chuyển từ đếm ký tự (`chars`) sang đếm âm tiết (`tts_words`), đo tốc độ phát âm thực tế `wps = word_count / tts_dur`, tận dụng độ nén tự nhiên `1.04x` để tính `target_words`, cố định biên độ hẹp `[target_words - 1, target_words + 1]`.
-  - Triển khai **Chốt chặn 1 (Pre-TTS)**: Bỏ qua các câu không rút gọn được hoặc bị cắt quá cụt (< 75% `min_words`).
-  - Triển khai **Chốt chặn 2 (Post-TTS Anti-Underflow Rollback)**: Tự động khôi phục câu thoại và file audio gốc nếu bản viết lại bị hụt quá sâu (>1.0s) trong khi bản cũ có thể nén vừa khít ở tốc độ `<= 1.18x`.
-  - `dubstudio/llm/fit_rewrite.py` & `prompts/fit_rewrite.md`: Tự động sinh `edit_instruction` theo 2 cấp độ (Cấp 1: Gọt tỉa vi phẫu bớt 1–4 từ đệm thừa giữ 85–90% câu gốc; Cấp 2: Diễn đạt thoát ý theo số từ). Bắt buộc LLM đếm từ và trả về `tts_word_count`.
-- **Tối ưu hóa bộ đo Font trong `ass.py` & Loại bỏ hoàn toàn 100% `PyQt6` khỏi bản đóng gói:**
-  - `dubstudio/subtitles/ass.py`: Thay thế hoàn toàn `QFontMetrics` bằng **Windows Native GDI (`ctypes.windll.gdi32` + `DrawTextW`)** đo kích thước font chuẩn xác từng pixel (< 0.5% sai số), bộ đệm HFONT tối ưu 0ms overhead, độc lập 100% không phụ thuộc PyQt6.
-  - Chừa đường lui an toàn: Hỗ trợ biến môi trường `DUBSTUDIO_USE_QT_FONT=1` để bật lại Qt nếu cần.
-  - `scripts/build_app.ps1`: Loại bỏ toàn bộ module `PyQt6` (`PyQt6.QtCore`, `QtGui`, `QtWidgets`, `sip`) và thư mục `ui` khỏi PyInstaller.
-  - Đóng gói & Tiết kiệm dung lượng: Bản build `dist\DubStudio` giảm sạch hơn **72.08 MB** (từ 1.453 MB xuống 1.381 MB), `dist\DubStudio\DubStudio.exe` chạy selftest đạt 100% OK.
-- **Kiểm thử (Quality Assurance):** Toàn bộ 210/210 tests pytest pass 100%.
-- **Sửa triệt để lỗi xuất video `name 'has_voice' is not defined`:**
-  - `dubstudio/stages/render.py`: Sửa biến `has_voice` thành `has_audio` tại bộ đếm luồng input ffmpeg cho hộp chữ và logo, giải quyết triệt để lỗi crash 0% khi xuất video. Bổ sung test tự động kiểm chứng trong `test_ui_export_and_split.py`.
-- **Sửa triệt để lỗi bấm "Tách tự động" làm mất track TTS trên Timeline:**
-  - `start_app_v2.py`: `auto_split_cues` bảo toàn 100% metadata phân đoạn (`tts_file`, `tts_dur`, `voice_start`, `voice_dur`, `has_tts`, `fit`, `fit_rate`, `mute_tts`, `muted_tts`), không còn bị lọc mất khi trả về giao diện.
-  - `StudioWorkspace.tsx` & `bridge.ts`: Cập nhật interface `CueItem` và giữ trọn vẹn thông tin file TTS khi nhận danh sách câu tách mới.
-- **Sửa triệt để lỗi khối TTS trên Timeline bị dài hơn phụ đề & âm thanh thực tế:**
-  - `dubstudio/stages/fit.py`: Đồng bộ `seg["tts_dur"] = effective_dur` sau bước fit/co giãn tốc độ (thay vì để nguyên thời lượng thô chưa co giãn).
-  - `StudioTimeline.tsx`: Khối TTS ưu tiên hiển thị theo `c.voice_dur` (hoặc `c.end - c.start`), khớp tuyệt đối 1:1 cả vị trí lẫn độ dài với khối phụ đề và âm thanh phát thực tế.
-- **Đóng gói phân phối sạch sẽ:** Bản `dist\DubStudio\DubStudio.exe` được biên dịch mới hoàn toàn, dọn sạch bộ nhớ cache build và tệp tạm.
-- **Thực thi Bước 2 — Dọn sạch tệp rác, xóa `ui/` (v1), hợp nhất entrypoint & tối ưu gói phát hành v2.0.0:**
-  - **Dọn dẹp tệp thừa:** Đã xóa bản sao chép `dubstudio/llm/translate.md`, xóa `release_manifest.json`, xóa `out/voice_previews/` và các tệp test tạm trong `out/`.
-  - **Dọn dẹp Frontend:** Xóa các component mồ côi `StudioFooter.tsx`, `ExportModal.tsx`; gỡ bỏ gói thừa `lucide-react` và chạy `npm prune`.
-  - **Xóa giao diện v1:** Xóa hoàn toàn thư mục `ui/` (toàn bộ code PyQt6 cũ); hợp nhất mã nguồn vào `start_app.py` thành entrypoint chính thức v2.0.0.
-  - **Kiểm thử tự động:** Cập nhật `tests/test_api.py` và gắn cờ skip chuẩn cho các test UI v1 đã ngừng hoạt động. Chạy `pytest tests/ -q` đạt **175 passed, 10 skipped (100% PASS, 0 lỗi)**.
-  - **Tối ưu PyInstaller (`scripts/build_app.ps1`):** Loại trừ triệt để `PyQt6`, `PyQt5`, `tkinter`, `ui`; build trực tiếp từ `start_app.py`; bảo đảm không gom thư mục `samples/` hay `tests/`.
-  - **Nghiệm thu đóng gói:** `dist\DubStudio\DubStudio.exe --selftest` trả về `ExitCode: 0`. Dung lượng bản phát hành đạt **1.381,9 MB (1.35 GB)**.
-- **Phát hành DubStudio v2.0.0 chính thức trên GitHub:**
-  - **Nâng cấp CI/CD Workflow (`.github/workflows/build_release.yml`):** Tích hợp Node.js 20 tự động build frontend React với Inline CSS Guarantee; gỡ bỏ hoàn toàn `PyQt6`; tự động dò mốc so sánh release trước (`v1.1.3`) và đóng gói Velopack (`full.nupkg`, `delta.nupkg`, `Setup.exe`).
-  - **Viết mới tài liệu & Ghi chú phát hành:** Viết mới hoàn toàn `README.md` theo chuẩn v2.0.0 và biên soạn `RELEASE_NOTES.md` theo ngôn ngữ phổ thông dễ hiểu kèm thông số kỹ thuật.
-  - **Đẩy mã nguồn & Gắn thẻ Tag:** Đã chạy `scripts/push_code_to_github.py --tag v2.0.0`, tạo commit `12f4cca`, đẩy lên `main` và gắn thẻ `v2.0.0`. GitHub Actions đang tự động đóng gói bản cài đặt trực tiếp trên mây.
+- **1. Sửa thước đo Timeline (Ruler 5s):**
+  - Hiển thị nhãn thời gian cố định 5 giây 1 số (`00:00`, `00:05`, `00:10`...) dạng `MM:SS`, không in số dày đặc gây rối mắt; giữ vạch phụ tinh tế 1s khi zoom.
+- **2. Khắc phục triệt để rò rỉ vùng giữ âm gốc ("ghost ranges") giữa các project:**
+  - Sửa `App.tsx`, `StudioWorkspace.tsx`, `MergeExportView.tsx` reset `keep_original_ranges = []` khi nạp hoặc tạo dự án mới, ngăn mang nhãn từ dự án trước sang.
+  - Sửa `mix.py` lọc bỏ các đoạn giữ âm gốc nằm ngoài thời lượng video.
+- **3. Cải tiến tách phụ đề DP (`cue_split.py`):**
+  - Giữ trọn vẹn cụm cố định ("thẹn với lòng"), ngắt đúng dấu phẩy tự nhiên.
+- **4. Kiểm thử & Đóng gói:**
+  - `pytest tests/ -q`: **191 passed, 10 skipped (100% PASS)**.
+  - Đóng gói hoàn tất `dist\DubStudio\DubStudio.exe`, selftest passed (Exit 0).
 
 ## Tiếp theo (Next)
-- Theo dõi GitHub Actions hoàn tất và người dùng tải bản cài đặt `v2.0.0` chính thức từ GitHub Releases.
+- Theo dõi trải nghiệm người dùng thực tế.
+
+## Vấn đề mở (Open issues)
+- Không có lỗi tồn đọng.

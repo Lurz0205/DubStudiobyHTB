@@ -50,21 +50,26 @@ class FitRewriter:
             emit_event(stage_name, 100.0, "Không có API key hoặc kết nối Gemini Web, bỏ qua viết lại LLM (offline fallback)", level="warning")
             return []
 
+        intro_msg = "Bạn là biên tập viên kịch bản lồng tiếng chuyên nghiệp. Vui lòng giúp cân bằng độ dài các câu thoại tiếng Việt dưới đây để khớp thời lượng và trả về định dạng JSON theo đúng yêu cầu:\n\n"
+
         # Pass-specific urgency directive
         if pass_idx == 1:
             urgency_hdr = (
+                intro_msg +
                 "## [LƯỢT 1 - BIÊN KỊCH LỒNG TIẾNG THOÁT Ý & CÂN BẰNG THỜI LƯỢNG THEO SỐ TỪ]:\n"
                 "- Đối với câu direction='shorter': Ưu tiên CẤP ĐỘ 1 (Gọt tỉa vi phẫu) nếu words_to_remove <= 4, giữ nguyên 85-90% câu gốc chỉ bớt từ thừa. Nếu words_to_remove >= 5, diễn đạt lại súc tích trong dải [min_words, max_words]. Bắt buộc đếm từ trước khi trả lời và điền tts_word_count.\n"
                 "- Đối với câu direction='longer': DỊCH THOÁT Ý ĐẦY ĐỦ, thoáng đạt, tự nhiên để lấp đầy thời lượng nói trên hình (đạt khoảng target_words trong [min_words, max_words]), không bịa sự kiện mới."
             )
         elif pass_idx == 2:
             urgency_hdr = (
+                intro_msg +
                 "## [LƯỢT 2 - TINH GỌN VI PHẪU CHUẨN XÁC THEO SỐ TỪ]: Lần trước câu vẫn hơi dài gây đè âm thanh nhẹ vào câu sau! "
                 "Hãy bám sát edit_instruction, giữ nguyên khung câu và chỉ cắt bớt đúng số từ mục tiêu, đảm bảo số từ nằm chuẩn trong [min_words, max_words]. "
                 "TUYỆT ĐỐI KHÔNG CẮT CỤT CÂU LỦNG CỦNG và KHÔNG ĐƯỢC VIẾT DƯỚI min_words! Nhớ điền tts_word_count."
             )
         else:
             urgency_hdr = (
+                intro_msg +
                 f"## [LƯỢT {pass_idx} - CÔ ĐỌNG THOÁT Ý TỐI ƯU]: Tối ưu hóa từ ngữ gãy gọn nhất theo target_words, "
                 "câu nói mạch lạc tự nhiên, không cụt lửng, không hở giọng dưới min_words. Nhớ điền tts_word_count."
             )
