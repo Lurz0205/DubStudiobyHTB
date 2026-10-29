@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import multiprocessing
 import os
+import re
 import socket
 import sys
 import threading
@@ -1078,8 +1079,10 @@ class DesktopAPIBridge:
 
             old_text_on_disk = str(old_on_disk.get("text") or old_on_disk.get("vi_text") or old_on_disk.get("tts_text") or "").strip()
 
-            # Detect if text, voice, or speed actually changed from disk
-            text_changed = bool(old_text_on_disk and new_text != old_text_on_disk)
+            # Detect if text, voice, or speed actually changed from disk (ignore line break formatting)
+            clean_new = re.sub(r'\s+', ' ', new_text).strip()
+            clean_old = re.sub(r'\s+', ' ', old_text_on_disk).strip()
+            text_changed = bool(clean_old and clean_new != clean_old)
             old_voice_on_disk = str(old_on_disk.get("voice") or "").strip()
             new_voice = str(item.get("voice") or "").strip()
             voice_changed = bool(old_voice_on_disk and new_voice and new_voice != old_voice_on_disk)
@@ -1183,6 +1186,15 @@ class DesktopAPIBridge:
                         item["tts_file"] = f"tts/{int(seg_id):04d}.wav"
                         if not item.get("tts_dur") and old_on_disk.get("tts_dur"):
                             item["tts_dur"] = old_on_disk.get("tts_dur")
+                        if not item.get("tts_hash") and old_on_disk.get("tts_hash"):
+                            item["tts_hash"] = old_on_disk.get("tts_hash")
+                        elif not item.get("tts_hash"):
+                            import hashlib
+                            txt_h = (item.get("tts_text") or item.get("vi_text") or "").strip()
+                            vc_h = str(item.get("voice") or old_on_disk.get("voice") or "").strip()
+                            sp_h = float(item.get("speed", 1.0) or 1.0)
+                            s_raw = f"{txt_h}|{vc_h}|{sp_h:.2f}"
+                            item["tts_hash"] = hashlib.md5(s_raw.encode("utf-8")).hexdigest()[:12]
 
             if "orig" in item and "zh" not in item:
                 item["zh"] = item["orig"]

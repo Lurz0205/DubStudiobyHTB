@@ -94,15 +94,18 @@ def run(job: JobContext, cfg: AppConfig) -> None:
 
         needed_segs.append(s)
         # Check if wav exists, is valid, and matches the content hash (either explicit speed or base 1.0)
-        is_clean = (
-            wav_file.exists()
-            and wav_file.stat().st_size > 500
-            and bool(s.get("tts_hash"))
-            and (
-                s.get("tts_hash") == expected_hash
-                or s.get("tts_hash") == _calc_seg_hash(txt, v_choice, 1.0)
-            )
+        wav_valid = wav_file.exists() and wav_file.stat().st_size > 500
+        has_matching_hash = bool(s.get("tts_hash")) and (
+            s.get("tts_hash") == expected_hash
+            or s.get("tts_hash") == _calc_seg_hash(txt, v_choice, 1.0)
         )
+
+        # Self-healing: if wav exists, is valid, but tts_hash was absent, heal and treat as clean
+        if wav_valid and not s.get("tts_hash"):
+            s["tts_hash"] = expected_hash
+            has_matching_hash = True
+
+        is_clean = wav_valid and has_matching_hash
         if not is_clean:
             dirty_segs.append((s, txt, v_choice, sp, expected_hash))
 

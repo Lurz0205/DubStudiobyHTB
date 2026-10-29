@@ -33,6 +33,21 @@ headers = {
 }
 
 session = requests.Session()
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
+
+retry_strategy = Retry(
+    total=5,
+    connect=5,
+    read=5,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=None,
+    raise_on_status=False,
+)
+adapter = HTTPAdapter(max_retries=retry_strategy)
+session.mount("https://", adapter)
+session.mount("http://", adapter)
 session.headers.update(headers)
 
 # Parse requested tag and commit message from CLI arguments
@@ -194,18 +209,22 @@ if files_to_upload:
     for idx, (rel_path, local_path, content_bytes, expected_sha) in enumerate(files_to_upload, 1):
         b64_content = base64.b64encode(content_bytes).decode("utf-8")
         blob_sha = None
-        for attempt in range(3):
-            blob_resp = session.post(
-                f"{api_base}/git/blobs",
-                json={"content": b64_content, "encoding": "base64"},
-            )
-            if blob_resp.status_code == 201:
-                blob_sha = blob_resp.json()["sha"]
-                break
-            time.sleep(1.0)
+        for attempt in range(5):
+            try:
+                blob_resp = session.post(
+                    f"{api_base}/git/blobs",
+                    json={"content": b64_content, "encoding": "base64"},
+                    timeout=30,
+                )
+                if blob_resp.status_code == 201:
+                    blob_sha = blob_resp.json()["sha"]
+                    break
+            except Exception as e:
+                print(f"    (Attempt {attempt+1}/5 upload failed: {e}, retrying...)", flush=True)
+            time.sleep(1.5)
             
         if not blob_sha:
-            print(f"Failed to create blob for {rel_path}: {blob_resp.status_code} {blob_resp.text}", flush=True)
+            print(f"Failed to create blob for {rel_path}", flush=True)
             exit(1)
             
         full_tree_items.append({

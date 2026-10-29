@@ -412,21 +412,21 @@ export const bridge = {
         return await (window as any).pywebview.api.get_app_version();
       } catch {}
     }
-    return '2.0.2';
+    return '2.0.3';
   },
 
   checkForUpdates: async () => {
     if (isNativeDesktop()) {
       return await (window as any).pywebview.api.check_for_updates();
     }
-    return { has_update: false, current_version: 'v2.0.2' };
+    return { has_update: false, current_version: 'v2.0.3' };
   },
 
   checkAppUpdate: async () => {
     if (isNativeDesktop()) {
       return await (window as any).pywebview.api.check_for_updates();
     }
-    return { has_update: false, current_version: 'v2.0.2' };
+    return { has_update: false, current_version: 'v2.0.3' };
   },
 
   getComponentsStatus: async () => {

@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 from typing import Any, Dict, List, Tuple
+import hashlib
 import numpy as np
 import soundfile as sf
 
@@ -23,6 +24,12 @@ from dubstudio.text.vi_normalize import normalize_for_tts
 MAX_SILENCE_SHIFT = 0.25
 ALLOWABLE_OVERLAP = 0.25
 FINAL_MAX_SPEEDUP = 1.28
+
+
+def _calc_seg_hash(text: str, voice: str, speed: float) -> str:
+    """Calculate deterministic content hash matching dubstudio.stages.tts."""
+    s = f"{text.strip()}|{voice.strip()}|{float(speed):.2f}"
+    return hashlib.md5(s.encode("utf-8")).hexdigest()[:12]
 
 
 def count_spoken_words(text: str) -> int:
@@ -847,8 +854,11 @@ def run(job: JobContext, cfg: AppConfig) -> None:
                     seg["text"] = item["new_vi"]
                     seg["tts_text"] = item["new_tts"]
                     seg["tts_dur"] = new_dur
-                    seg["tts_hash"] = None
                     seg["voice"] = item["voice"]
+                    seg["tts_file"] = f"tts/{sid:04d}.wav"
+                    seg["has_tts"] = True
+                    sp_val = float(seg.get("speed", 1.0) or 1.0)
+                    seg["tts_hash"] = _calc_seg_hash(item["new_tts"] or item["new_vi"], item["voice"], sp_val)
                     new_cues = split_sentence_cues(
                         item["new_vi"],
                         seg["start"],
@@ -1059,14 +1069,6 @@ def run(job: JobContext, cfg: AppConfig) -> None:
 
     with open(segments_file, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-
-    units_file = job.workspace / "units.json"
-    if units_file.exists():
-        try:
-            with open(units_file, "w", encoding="utf-8") as f:
-                json.dump(segments, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
 
     job.finish_stage(stage_name, outputs)
     emit_event(stage_name, 100.0, "Hoàn tất khớp âm thanh! 100% các đoạn thoại không bị đè lên nhau trên timeline.")
